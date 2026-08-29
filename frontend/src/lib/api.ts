@@ -1,6 +1,7 @@
 import type {
   Account, Budget, BudgetAlert, BudgetVsActual, Category, CategoryDrilldownNode,
-  CategoryTotal, ConflictRow, Highlights, SavingsGoalProgress, SyncConfig, SyncLogEntry,
+  CategoryTotal, ConflictRow, Highlights, ImportCommitResult, ImportPreviewResult, ImportRowIn,
+  MonthlyBreakdownRow, SavingsGoalProgress, SyncConfig, SyncLogEntry,
   SyncStatus, Totals, Transaction, TrendForRange,
 } from './types';
 
@@ -44,6 +45,7 @@ export const api = {
     request<Highlights>(`/api/dashboard/highlights${qs({ range, ...dateBounds })}`),
   trendForRange: (range: string) => request<TrendForRange>(`/api/dashboard/trend_for_range${qs({ range })}`),
   budgetVsActual: () => request<BudgetVsActual[]>('/api/dashboard/budget_vs_actual'),
+  monthlyBreakdown: () => request<MonthlyBreakdownRow[]>('/api/dashboard/monthly_breakdown'),
   budgetAlerts: () => request<BudgetAlert[]>('/api/dashboard/budget_alerts'),
 
   // ---------- savings goal ----------
@@ -51,7 +53,8 @@ export const api = {
   setSavingsGoal: (goal_amount: number) =>
     request('/api/savings_goal', { method: 'POST', body: JSON.stringify({ goal_amount }) }),
   clearSavingsGoal: () => request('/api/savings_goal', { method: 'DELETE' }),
-  savingsGoalProgress: () => request<SavingsGoalProgress>('/api/savings_goal/progress'),
+  savingsGoalProgress: (periodKey?: string) =>
+    request<SavingsGoalProgress>(`/api/savings_goal/progress${qs({ period_key: periodKey })}`),
 
   // ---------- budgets ----------
   listBudgets: () => request<Budget[]>('/api/budgets'),
@@ -74,6 +77,22 @@ export const api = {
   createTransaction: (payload: Record<string, unknown>) =>
     request<Transaction>('/api/transactions', { method: 'POST', body: JSON.stringify(payload) }),
   deleteTransaction: (id: string) => request(`/api/transactions/${id}`, { method: 'DELETE' }),
+  deletePendingTransactions: () =>
+    request<{ hard_deleted: number; soft_deleted: number; total: number }>('/api/transactions/pending', { method: 'DELETE' }),
+
+  // ---------- csv import ----------
+  importPreview: async (file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const res = await fetch('/api/imports/csv/preview', { method: 'POST', body: formData });
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(`${res.status}: ${body}`);
+    }
+    return res.json() as Promise<ImportPreviewResult>;
+  },
+  importCommit: (rows: ImportRowIn[]) =>
+    request<ImportCommitResult>('/api/imports/csv/commit', { method: 'POST', body: JSON.stringify({ rows }) }),
 
   // ---------- conflicts ----------
   listConflicts: () => request<ConflictRow[]>('/api/conflicts'),

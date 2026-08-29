@@ -2,6 +2,7 @@ import { Route, BrowserRouter, Routes } from 'react-router-dom';
 import { NavBar } from './components/NavBar';
 import { Dashboard } from './pages/Dashboard';
 import { Transactions } from './pages/Transactions';
+import { Import } from './pages/Import';
 import { Compare } from './pages/Compare';
 import { Conflicts } from './pages/Conflicts';
 import { Settings } from './pages/Settings';
@@ -16,6 +17,7 @@ export function App() {
           <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/transactions" element={<Transactions />} />
+            <Route path="/import" element={<Import />} />
             <Route path="/compare" element={<Compare />} />
             <Route path="/conflicts" element={<Conflicts />} />
             <Route path="/settings" element={<Settings />} />

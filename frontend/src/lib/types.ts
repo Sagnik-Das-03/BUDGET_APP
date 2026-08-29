@@ -141,6 +141,47 @@ export interface ConflictRow {
 
 export type RangeKey = 'this_week' | 'this_month' | 'this_year' | 'all_time';
 
+export interface ImportRowPreview {
+  row_key: string;
+  date: string;
+  description: string;
+  amount: number;
+  transaction_type: 'Income' | 'Expense';
+  category_guess: string;
+  is_duplicate: boolean;
+  duplicate_of: string | null;
+}
+
+export interface ImportPreviewResult {
+  rows: ImportRowPreview[];
+  skipped_rows: number;
+  detected_columns: Record<string, number>;
+}
+
+export interface ImportRowIn {
+  date: string;
+  description: string;
+  amount: number;
+  transaction_type: 'Income' | 'Expense';
+  category: string;
+  account: string;
+}
+
+export interface ImportCommitResult {
+  created_count: number;
+  transaction_ids: string[];
+}
+
+export interface MonthlyBreakdownRow {
+  period_key: string;
+  income: number;
+  expenses: number;
+  sip: number;
+  cash_savings: number;
+  net: number;
+  savings_rate: number;
+}
+
 export interface SyncConfig {
   credentials_configured: boolean;
   google_spreadsheet_id: string;

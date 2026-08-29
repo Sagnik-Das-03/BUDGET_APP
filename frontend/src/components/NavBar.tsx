@@ -7,6 +7,7 @@ import { ModeToggle } from './ModeToggle';
 const LINKS = [
   { to: '/', label: 'Dashboard', end: true },
   { to: '/transactions', label: 'Transactions' },
+  { to: '/import', label: 'Import' },
   { to: '/compare', label: 'Compare' },
   { to: '/conflicts', label: 'Conflicts' },
   { to: '/settings', label: 'Settings' },

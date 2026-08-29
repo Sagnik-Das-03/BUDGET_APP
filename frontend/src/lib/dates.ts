@@ -16,6 +16,11 @@ export function monthBounds(periodKey: string): { date_from: string; date_to: st
   return { date_from: iso(from), date_to: iso(to) };
 }
 
+/** Inclusive [date_from, date_to] Jan 1 - Dec 31 bounds for a "YYYY" year value. */
+export function yearBounds(year: string): { date_from: string; date_to: string } {
+  return { date_from: `${year}-01-01`, date_to: `${year}-12-31` };
+}
+
 /** Inclusive [date_from, date_to] Monday-Sunday bounds for a "YYYY-Www" ISO week
  * value (what <input type="week"> produces). */
 export function weekBounds(weekValue: string): { date_from: string; date_to: string } {

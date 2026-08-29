@@ -74,6 +74,17 @@ class TransactionRepository:
     def all_active(self) -> list[Transaction]:
         return self.filter()
 
+    def find_duplicates(self, *, date: date_type, amount: float, transaction_type: str) -> list[Transaction]:
+        """Same date + type + amount (to the paisa) as an existing active transaction -
+        used by CSV import to flag likely-already-entered rows before they're committed."""
+        stmt = select(Transaction).where(
+            Transaction.date == date,
+            Transaction.transaction_type == transaction_type,
+            Transaction.deleted_at.is_(None),
+        )
+        candidates = list(self.session.scalars(stmt))
+        return [t for t in candidates if abs(t.amount - amount) < 0.01]
+
     # ---------- app-side writes (source="app") ----------
 
     def create(
@@ -162,6 +173,31 @@ class TransactionRepository:
         txn.sync_status = SyncStatus.pending
         self.session.flush()
         return txn
+
+    def delete_all_pending(self) -> dict:
+        """Bulk-deletes every active transaction currently sitting in pending/error
+        sync state - e.g. to discard a bad CSV import before it ever reaches Sheets.
+        A row that was never synced (last_synced_at is None) is hard-deleted: there's
+        nothing on the Sheets side to reconcile, so soft-deleting it would just queue
+        a pointless "deleted" row to be appended to the sheet on the next sync. A row
+        that WAS synced before (edited since, hence pending again) is soft-deleted as
+        usual, so the deletion still propagates to Sheets on the next sync."""
+        stmt = select(Transaction).where(
+            Transaction.sync_status.in_([SyncStatus.pending, SyncStatus.error]),
+            Transaction.deleted_at.is_(None),
+        )
+        rows = list(self.session.scalars(stmt))
+        hard_deleted = 0
+        soft_deleted = 0
+        for txn in rows:
+            if txn.last_synced_at is None:
+                self.session.delete(txn)
+                hard_deleted += 1
+            else:
+                txn.deleted_at = utcnow()
+                soft_deleted += 1
+        self.session.flush()
+        return {"hard_deleted": hard_deleted, "soft_deleted": soft_deleted, "total": hard_deleted + soft_deleted}
 
     # ---------- sync-side writes (source="google_sheets") ----------
 

@@ -56,6 +56,15 @@ def create_transaction(payload: TransactionIn, session: Session = Depends(get_se
     return _to_out(txn)
 
 
+@router.delete("/pending")
+def delete_all_pending(session: Session = Depends(get_session)):
+    """Bulk-deletes every transaction currently in pending/error sync state -
+    registered before /{transaction_id} so "pending" isn't swallowed as an id."""
+    result = TransactionRepository(session).delete_all_pending()
+    session.commit()
+    return result
+
+
 @router.put("/{transaction_id}", response_model=TransactionOut)
 def update_transaction(transaction_id: str, payload: TransactionIn, session: Session = Depends(get_session)):
     cat_repo, acct_repo, tx_repo = CategoryRepository(session), AccountRepository(session), TransactionRepository(session)

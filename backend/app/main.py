@@ -5,7 +5,7 @@ from fastapi import Depends, FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api import accounts, budgets, categories, conflicts, dashboard, savings_goal, sync, transactions
+from app.api import accounts, budgets, categories, conflicts, dashboard, imports, savings_goal, sync, transactions
 from app.auth import require_auth
 from app.db import init_db, session_scope
 from app.repositories.accounts import AccountRepository
@@ -28,6 +28,7 @@ app.include_router(savings_goal.router, dependencies=_auth)
 app.include_router(dashboard.router, dependencies=_auth)
 app.include_router(sync.router, dependencies=_auth)
 app.include_router(conflicts.router, dependencies=_auth)
+app.include_router(imports.router, dependencies=_auth)
 
 
 @app.on_event("startup")

@@ -38,6 +38,52 @@ def test_transaction_create_update_soft_delete(session):
     assert txn.transaction_id not in [t.transaction_id for t in tx_repo.filter()]
 
 
+def test_delete_all_pending_hard_deletes_never_synced_rows(session):
+    cat_repo, acct_repo, tx_repo = CategoryRepository(session), AccountRepository(session), TransactionRepository(session)
+    category, account = cat_repo.get_by_name("Shopping"), acct_repo.get_or_create("Primary")
+
+    txn = tx_repo.create(date=date(2026, 9, 1), description="Bad import row", amount=100.0,
+                          transaction_type=TransactionType.expense, category=category, account=account)
+    assert txn.last_synced_at is None  # never synced
+
+    result = tx_repo.delete_all_pending()
+    assert result == {"hard_deleted": 1, "soft_deleted": 0, "total": 1}
+    # hard-deleted, not just soft-deleted - gone even from an include_deleted query
+    assert tx_repo.get_by_transaction_id(txn.transaction_id) is None
+
+
+def test_delete_all_pending_soft_deletes_previously_synced_rows(session):
+    cat_repo, acct_repo, tx_repo = CategoryRepository(session), AccountRepository(session), TransactionRepository(session)
+    category, account = cat_repo.get_by_name("Shopping"), acct_repo.get_or_create("Primary")
+
+    txn = tx_repo.create(date=date(2026, 9, 1), description="Edited after syncing", amount=100.0,
+                          transaction_type=TransactionType.expense, category=category, account=account)
+    tx_repo.mark_synced(txn.transaction_id)
+    tx_repo.update(txn.transaction_id, amount=150.0)  # edit -> back to pending, but now has last_synced_at
+    assert txn.sync_status.value == "pending"
+    assert txn.last_synced_at is not None
+
+    result = tx_repo.delete_all_pending()
+    assert result == {"hard_deleted": 0, "soft_deleted": 1, "total": 1}
+    # soft-deleted so the deletion can still propagate to Sheets - row still exists, just marked deleted
+    still_there = tx_repo.get_by_transaction_id(txn.transaction_id)
+    assert still_there is not None
+    assert still_there.deleted_at is not None
+
+
+def test_delete_all_pending_ignores_synced_rows(session):
+    cat_repo, acct_repo, tx_repo = CategoryRepository(session), AccountRepository(session), TransactionRepository(session)
+    category, account = cat_repo.get_by_name("Shopping"), acct_repo.get_or_create("Primary")
+
+    txn = tx_repo.create(date=date(2026, 9, 1), description="Already synced", amount=100.0,
+                          transaction_type=TransactionType.expense, category=category, account=account)
+    tx_repo.mark_synced(txn.transaction_id)
+
+    result = tx_repo.delete_all_pending()
+    assert result == {"hard_deleted": 0, "soft_deleted": 0, "total": 0}
+    assert tx_repo.get_by_transaction_id(txn.transaction_id).deleted_at is None
+
+
 def test_transaction_ids_increment_per_year(session):
     cat_repo, acct_repo, tx_repo = CategoryRepository(session), AccountRepository(session), TransactionRepository(session)
     category, account = cat_repo.get_by_name("Shopping"), acct_repo.get_or_create("Primary")

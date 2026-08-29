@@ -94,3 +94,52 @@ class SheetRowValidationError(BaseModel):
     row_number: int
     transaction_id: Optional[str]
     reason: str
+
+
+class ImportRowOut(BaseModel):
+    row_key: str
+    date: date_type
+    description: str
+    amount: float
+    transaction_type: str
+    category_guess: str
+    is_duplicate: bool
+    duplicate_of: Optional[str] = None
+
+
+class ImportPreviewOut(BaseModel):
+    rows: list[ImportRowOut]
+    skipped_rows: int
+    detected_columns: dict[str, int]
+
+
+class ImportRowIn(BaseModel):
+    date: date_type
+    description: str = Field(min_length=1, max_length=255)
+    amount: float
+    transaction_type: str
+    category: str
+    account: str = "Primary"
+
+    @field_validator("transaction_type")
+    @classmethod
+    def _valid_type(cls, v: str) -> str:
+        if v not in ("Income", "Expense"):
+            raise ValueError('transaction_type must be "Income" or "Expense"')
+        return v
+
+    @field_validator("amount")
+    @classmethod
+    def _positive_amount(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError("amount must be positive (sign is derived from transaction_type)")
+        return v
+
+
+class ImportCommitIn(BaseModel):
+    rows: list[ImportRowIn]
+
+
+class ImportCommitOut(BaseModel):
+    created_count: int
+    transaction_ids: list[str]

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
-import { X } from 'lucide-react';
+import { Trash2, X } from 'lucide-react';
 import { api } from '../lib/api';
 import { fmtMoney } from '../lib/format';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -72,6 +72,15 @@ export function Settings() {
   const deactivateAccount = useMutation({
     mutationFn: (id: number) => api.deactivateAccount(id),
     onSuccess: () => invalidate('accounts'),
+  });
+
+  const [pendingDeleteResult, setPendingDeleteResult] = useState<{ total: number } | null>(null);
+  const deletePending = useMutation({
+    mutationFn: () => api.deletePendingTransactions(),
+    onSuccess: (data) => {
+      setPendingDeleteResult({ total: data.total });
+      queryClient.invalidateQueries({ queryKey: ['transactions'] });
+    },
   });
 
   const goalByCategory: Record<string, number> = {};
@@ -226,6 +235,43 @@ export function Settings() {
             <Input type="text" placeholder="New account name" value={newAcctName} onChange={(e) => setNewAcctName(e.target.value)} className="w-48" />
             <Button size="sm" disabled={!newAcctName.trim()} onClick={() => addAccount.mutate()}>Add Account</Button>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card className="border-destructive/40">
+        <CardHeader>
+          <CardTitle className="text-destructive">Data management</CardTitle>
+          <CardDescription>
+            Deletes every transaction still waiting to sync (or that previously failed to sync) - e.g. to discard
+            a bad CSV import before it ever reaches Google Sheets. Already-synced transactions are never touched.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-wrap items-center gap-2.5">
+          <Button
+            variant="destructive"
+            size="sm"
+            disabled={deletePending.isPending}
+            onClick={() => {
+              if (confirm(
+                'Delete ALL pending / failed-sync transactions? This cannot be undone from the UI.\n\n' +
+                'Transactions already synced to Google Sheets are not affected.',
+              )) {
+                setPendingDeleteResult(null);
+                deletePending.mutate();
+              }
+            }}
+          >
+            <Trash2 className="size-4" />
+            {deletePending.isPending ? 'Deleting…' : 'Delete all pending transactions'}
+          </Button>
+          {pendingDeleteResult && (
+            <span className="text-xs text-muted-foreground">
+              Deleted {pendingDeleteResult.total} transaction{pendingDeleteResult.total === 1 ? '' : 's'}.
+            </span>
+          )}
+          {deletePending.isError && (
+            <span className="text-xs text-destructive">{(deletePending.error as Error).message}</span>
+          )}
         </CardContent>
       </Card>
     </div>
