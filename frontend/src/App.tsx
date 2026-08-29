@@ -10,17 +10,19 @@ import { Logs } from './pages/Logs';
 export function App() {
   return (
     <BrowserRouter>
-      <NavBar />
-      <main className="content">
-        <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/transactions" element={<Transactions />} />
-          <Route path="/compare" element={<Compare />} />
-          <Route path="/conflicts" element={<Conflicts />} />
-          <Route path="/settings" element={<Settings />} />
-          <Route path="/logs" element={<Logs />} />
-        </Routes>
-      </main>
+      <div className="min-h-screen bg-background">
+        <NavBar />
+        <main className="mx-auto max-w-6xl px-6 py-8">
+          <Routes>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/transactions" element={<Transactions />} />
+            <Route path="/compare" element={<Compare />} />
+            <Route path="/conflicts" element={<Conflicts />} />
+            <Route path="/settings" element={<Settings />} />
+            <Route path="/logs" element={<Logs />} />
+          </Routes>
+        </main>
+      </div>
     </BrowserRouter>
   );
 }

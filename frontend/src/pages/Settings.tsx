@@ -1,7 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
+import { X } from 'lucide-react';
 import { api } from '../lib/api';
 import { fmtMoney } from '../lib/format';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 
 export function Settings() {
   const queryClient = useQueryClient();
@@ -71,113 +78,156 @@ export function Settings() {
   budgets.data?.filter((b) => !b.period_key).forEach((b) => { goalByCategory[b.category] = b.goal_amount; });
 
   return (
-    <>
-      <h1>Settings</h1>
+    <div className="flex flex-col gap-8">
+      <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
 
-      <h2>Google Sheets sync</h2>
-      <p className="subtitle">
-        Credentials: {config.data?.credentials_configured ? '✓ configured' : '✗ not configured — see docs/service_account_setup.md'}<br />
-        Spreadsheet ID: {config.data?.google_spreadsheet_id || 'not set (add GOOGLE_SPREADSHEET_ID to .env)'}<br />
-        Sync interval: every {config.data?.sync_interval_seconds}s
-      </p>
-      <div className="form-row">
-        <label htmlFor="interval-input" style={{ fontSize: 13 }}>Change to</label>
-        <input id="interval-input" type="number" min={config.data?.sync_interval_min ?? 15} step="5"
-          style={{ width: 90 }} value={intervalInput} onChange={(e) => setIntervalInput(e.target.value)} />
-        <span className="subtitle" style={{ margin: 0 }}>seconds</span>
-        <button className="btn primary" onClick={() => {
-          const v = parseInt(intervalInput, 10);
-          const min = config.data?.sync_interval_min ?? 15;
-          if (!v || v < min) { alert(`Enter at least ${min} seconds`); return; }
-          saveInterval.mutate(v);
-        }}>Save</button>
-        <span className="subtitle" style={{ margin: 0 }}>
-          Takes effect immediately, no restart — overrides SYNC_INTERVAL_SECONDS in .env
-          (default: {config.data?.sync_interval_default}s) until changed again here.
-        </span>
-      </div>
-
-      <h2>Net Savings Goal</h2>
-      <p className="subtitle">A monthly target on overall Net Savings (Income minus true Expenses) - separate from per-category budgets.</p>
-      <div className="form-row">
-        <input type="number" step="0.01" min="0" placeholder="e.g. 30000" style={{ width: 150 }}
-          value={goalInput} onChange={(e) => setGoalInput(e.target.value)} />
-        <button className="btn primary" onClick={() => {
-          const v = parseFloat(goalInput);
-          if (!v || v <= 0) { alert('Enter a goal amount greater than 0'); return; }
-          saveSavingsGoal.mutate(v);
-        }}>Save</button>
-        {savingsGoal.data?.goal_amount ? (
-          <button className="btn" onClick={() => clearSavingsGoal.mutate()}>Clear</button>
-        ) : null}
-        <span className="subtitle" style={{ margin: 0 }}>
-          {savingsGoal.data?.goal_amount ? `Current goal: ${fmtMoney(savingsGoal.data.goal_amount)} / month` : 'No goal set'}
-        </span>
-      </div>
-
-      <h2>Budgets</h2>
-      <p className="subtitle">Set a recurring monthly goal per category. The Dashboard warns you when a category crosses 90% of its goal for the current month.</p>
-      <table>
-        <thead><tr><th>Category</th><th className="amount">Monthly Goal</th><th></th></tr></thead>
-        <tbody>
-          {categories.data?.filter((c) => c.name !== 'Income').map((c) => {
-            const goal = goalByCategory[c.name];
-            const inputValue = budgetInputs[c.name] ?? (goal ? String(goal) : '');
-            return (
-              <tr key={c.id}>
-                <td><span className="swatch" style={{ background: c.color_hex }} /> {c.name}</td>
-                <td className="amount">
-                  <input type="number" step="0.01" min="0" style={{ width: 110, textAlign: 'right' }}
-                    placeholder="No goal" value={inputValue}
-                    onChange={(e) => setBudgetInputs({ ...budgetInputs, [c.name]: e.target.value })} />
-                </td>
-                <td>
-                  <button className="btn" onClick={() => {
-                    const v = parseFloat(inputValue);
-                    if (!v || v <= 0) { alert('Enter a goal amount greater than 0'); return; }
-                    saveBudget.mutate({ category: c.name, amount: v });
-                  }}>Save</button>
-                  {goal ? <button className="btn" onClick={() => clearBudget.mutate(c.name)}>Clear</button> : null}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-
-      <h2>Categories</h2>
-      <div className="category-list">
-        {categories.data?.map((c) => (
-          <span key={c.id} className="category-chip">
-            <span className="swatch" style={{ background: c.color_hex }} />{c.name}
-            <button style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#e34948' }}
-              onClick={() => {
-                if (confirm("Deactivate this category? Historical transactions keep it, but it won't be selectable for new ones.")) {
-                  deactivateCategory.mutate(c.id);
-                }
-              }}>✕</button>
+      <Card>
+        <CardHeader>
+          <CardTitle>Google Sheets sync</CardTitle>
+          <CardDescription className="space-y-0.5">
+            <div>Credentials: {config.data?.credentials_configured ? '✓ configured' : '✗ not configured — see docs/service_account_setup.md'}</div>
+            <div>Spreadsheet ID: {config.data?.google_spreadsheet_id || 'not set (add GOOGLE_SPREADSHEET_ID to .env)'}</div>
+            <div>Sync interval: every {config.data?.sync_interval_seconds}s</div>
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-wrap items-center gap-2.5">
+          <Label htmlFor="interval-input" className="text-sm">Change to</Label>
+          <Input id="interval-input" type="number" min={config.data?.sync_interval_min ?? 15} step="5"
+            className="w-24" value={intervalInput} onChange={(e) => setIntervalInput(e.target.value)} />
+          <span className="text-sm text-muted-foreground">seconds</span>
+          <Button size="sm" onClick={() => {
+            const v = parseInt(intervalInput, 10);
+            const min = config.data?.sync_interval_min ?? 15;
+            if (!v || v < min) { alert(`Enter at least ${min} seconds`); return; }
+            saveInterval.mutate(v);
+          }}>Save</Button>
+          <span className="text-xs text-muted-foreground">
+            Takes effect immediately, no restart — overrides SYNC_INTERVAL_SECONDS in .env
+            (default: {config.data?.sync_interval_default}s) until changed again here.
           </span>
-        ))}
-      </div>
-      <div className="form-row">
-        <input type="text" placeholder="New category name" value={newCatName} onChange={(e) => setNewCatName(e.target.value)} />
-        <input type="color" value={newCatColor} onChange={(e) => setNewCatColor(e.target.value)} />
-        <button className="btn primary" disabled={!newCatName.trim()} onClick={() => addCategory.mutate()}>Add Category</button>
-      </div>
+        </CardContent>
+      </Card>
 
-      <h2>Accounts</h2>
-      <div className="category-list">
-        {accounts.data?.map((a) => (
-          <span key={a.id} className="category-chip">{a.name}
-            <button style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#e34948' }}
-              onClick={() => { if (confirm('Deactivate this account?')) deactivateAccount.mutate(a.id); }}>✕</button>
+      <Card>
+        <CardHeader>
+          <CardTitle>Net Savings Goal</CardTitle>
+          <CardDescription>A monthly target on overall Net Savings (Income minus true Expenses) - separate from per-category budgets.</CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-wrap items-center gap-2.5">
+          <Input type="number" step="0.01" min="0" placeholder="e.g. 30000" className="w-36"
+            value={goalInput} onChange={(e) => setGoalInput(e.target.value)} />
+          <Button size="sm" onClick={() => {
+            const v = parseFloat(goalInput);
+            if (!v || v <= 0) { alert('Enter a goal amount greater than 0'); return; }
+            saveSavingsGoal.mutate(v);
+          }}>Save</Button>
+          {savingsGoal.data?.goal_amount ? (
+            <Button size="sm" variant="outline" onClick={() => clearSavingsGoal.mutate()}>Clear</Button>
+          ) : null}
+          <span className="text-xs text-muted-foreground">
+            {savingsGoal.data?.goal_amount ? `Current goal: ${fmtMoney(savingsGoal.data.goal_amount)} / month` : 'No goal set'}
           </span>
-        ))}
-      </div>
-      <div className="form-row">
-        <input type="text" placeholder="New account name" value={newAcctName} onChange={(e) => setNewAcctName(e.target.value)} />
-        <button className="btn primary" disabled={!newAcctName.trim()} onClick={() => addAccount.mutate()}>Add Account</button>
-      </div>
-    </>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Budgets</CardTitle>
+          <CardDescription>Set a recurring monthly goal per category. The Dashboard warns you when a category crosses 90% of its goal for the current month.</CardDescription>
+        </CardHeader>
+        <CardContent className="px-0">
+          <Table>
+            <TableHeader>
+              <TableRow><TableHead className="pl-6">Category</TableHead><TableHead className="text-right">Monthly Goal</TableHead><TableHead className="pr-6"></TableHead></TableRow>
+            </TableHeader>
+            <TableBody>
+              {categories.data?.filter((c) => c.name !== 'Income').map((c) => {
+                const goal = goalByCategory[c.name];
+                const inputValue = budgetInputs[c.name] ?? (goal ? String(goal) : '');
+                return (
+                  <TableRow key={c.id}>
+                    <TableCell className="pl-6">
+                      <span className="mr-1.5 inline-block size-2.5 rounded-full align-middle" style={{ background: c.color_hex }} /> {c.name}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Input type="number" step="0.01" min="0" className="ml-auto w-28 text-right"
+                        placeholder="No goal" value={inputValue}
+                        onChange={(e) => setBudgetInputs({ ...budgetInputs, [c.name]: e.target.value })} />
+                    </TableCell>
+                    <TableCell className="pr-6">
+                      <div className="flex justify-end gap-1.5">
+                        <Button size="sm" variant="outline" onClick={() => {
+                          const v = parseFloat(inputValue);
+                          if (!v || v <= 0) { alert('Enter a goal amount greater than 0'); return; }
+                          saveBudget.mutate({ category: c.name, amount: v });
+                        }}>Save</Button>
+                        {goal ? <Button size="sm" variant="ghost" onClick={() => clearBudget.mutate(c.name)}>Clear</Button> : null}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Categories</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex flex-wrap gap-2">
+            {categories.data?.map((c) => (
+              <Badge key={c.id} variant="outline" className="gap-1.5 py-1 pl-1 pr-2 text-xs">
+                <span className="inline-block size-2.5 rounded-full" style={{ background: c.color_hex }} />
+                {c.name}
+                <button
+                  className="ml-0.5 text-muted-foreground hover:text-destructive"
+                  onClick={() => {
+                    if (confirm("Deactivate this category? Historical transactions keep it, but it won't be selectable for new ones.")) {
+                      deactivateCategory.mutate(c.id);
+                    }
+                  }}
+                >
+                  <X className="size-3" />
+                </button>
+              </Badge>
+            ))}
+          </div>
+          <div className="flex flex-wrap items-center gap-2.5">
+            <Input type="text" placeholder="New category name" value={newCatName} onChange={(e) => setNewCatName(e.target.value)} className="w-48" />
+            <input type="color" value={newCatColor} onChange={(e) => setNewCatColor(e.target.value)}
+              className="h-9 w-12 cursor-pointer rounded-md border border-input p-1" />
+            <Button size="sm" disabled={!newCatName.trim()} onClick={() => addCategory.mutate()}>Add Category</Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Accounts</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex flex-wrap gap-2">
+            {accounts.data?.map((a) => (
+              <Badge key={a.id} variant="outline" className="gap-1.5 py-1 pl-2.5 pr-2 text-xs">
+                {a.name}
+                <button
+                  className="ml-0.5 text-muted-foreground hover:text-destructive"
+                  onClick={() => { if (confirm('Deactivate this account?')) deactivateAccount.mutate(a.id); }}
+                >
+                  <X className="size-3" />
+                </button>
+              </Badge>
+            ))}
+          </div>
+          <div className="flex flex-wrap items-center gap-2.5">
+            <Input type="text" placeholder="New account name" value={newAcctName} onChange={(e) => setNewAcctName(e.target.value)} className="w-48" />
+            <Button size="sm" disabled={!newAcctName.trim()} onClick={() => addAccount.mutate()}>Add Account</Button>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
   );
 }

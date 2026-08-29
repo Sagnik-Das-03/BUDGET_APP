@@ -1,4 +1,5 @@
 import type { RangeKey } from '../lib/types';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 
 const RANGES: { key: RangeKey; label: string }[] = [
   { key: 'this_week', label: 'This Week' },
@@ -9,12 +10,18 @@ const RANGES: { key: RangeKey; label: string }[] = [
 
 export function RangeToggle({ value, onChange }: { value: RangeKey; onChange: (r: RangeKey) => void }) {
   return (
-    <div className="range-toggle">
+    <ToggleGroup
+      type="single"
+      variant="outline"
+      value={value}
+      onValueChange={(v) => v && onChange(v as RangeKey)}
+      className="bg-card"
+    >
       {RANGES.map((r) => (
-        <button key={r.key} className={r.key === value ? 'active' : ''} onClick={() => onChange(r.key)}>
+        <ToggleGroupItem key={r.key} value={r.key} className="text-xs sm:text-sm">
           {r.label}
-        </button>
+        </ToggleGroupItem>
       ))}
-    </div>
+    </ToggleGroup>
   );
 }

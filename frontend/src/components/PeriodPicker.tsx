@@ -1,4 +1,7 @@
 import { monthBounds, monthLabel, weekBounds } from '../lib/dates';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import { Input } from '@/components/ui/input';
 
 export type PeriodType = 'week' | 'month' | 'custom';
 
@@ -38,30 +41,36 @@ interface Props {
 
 export function PeriodPicker({ title, value, onChange }: Props) {
   return (
-    <div className="chart-card">
-      <h3 style={{ marginBottom: 10 }}>{title}</h3>
-      <div className="form-row" style={{ marginBottom: 8 }}>
-        {(['week', 'month', 'custom'] as PeriodType[]).map((t) => (
-          <label key={t} style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 4 }}>
-            <input type="radio" name={`${title}-type`} checked={value.type === t}
-              onChange={() => onChange({ ...value, type: t })} />
-            {t === 'week' ? 'Week' : t === 'month' ? 'Month' : 'Custom range'}
-          </label>
-        ))}
-      </div>
-      {value.type === 'week' && (
-        <input type="week" value={value.week} onChange={(e) => onChange({ ...value, week: e.target.value })} />
-      )}
-      {value.type === 'month' && (
-        <input type="month" value={value.month} onChange={(e) => onChange({ ...value, month: e.target.value })} />
-      )}
-      {value.type === 'custom' && (
-        <div className="form-row" style={{ marginBottom: 0 }}>
-          <input type="date" value={value.from} onChange={(e) => onChange({ ...value, from: e.target.value })} />
-          <span style={{ fontSize: 13 }}>to</span>
-          <input type="date" value={value.to} onChange={(e) => onChange({ ...value, to: e.target.value })} />
-        </div>
-      )}
-    </div>
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-sm font-semibold">{title}</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <ToggleGroup
+          type="single"
+          variant="outline"
+          size="sm"
+          value={value.type}
+          onValueChange={(v) => v && onChange({ ...value, type: v as PeriodType })}
+        >
+          <ToggleGroupItem value="week">Week</ToggleGroupItem>
+          <ToggleGroupItem value="month">Month</ToggleGroupItem>
+          <ToggleGroupItem value="custom">Custom range</ToggleGroupItem>
+        </ToggleGroup>
+        {value.type === 'week' && (
+          <Input type="week" value={value.week} onChange={(e) => onChange({ ...value, week: e.target.value })} />
+        )}
+        {value.type === 'month' && (
+          <Input type="month" value={value.month} onChange={(e) => onChange({ ...value, month: e.target.value })} />
+        )}
+        {value.type === 'custom' && (
+          <div className="flex items-center gap-2">
+            <Input type="date" value={value.from} onChange={(e) => onChange({ ...value, from: e.target.value })} />
+            <span className="text-xs text-muted-foreground">to</span>
+            <Input type="date" value={value.to} onChange={(e) => onChange({ ...value, to: e.target.value })} />
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }

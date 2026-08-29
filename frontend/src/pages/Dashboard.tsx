@@ -11,6 +11,7 @@ import { KpiRow, type KpiTileData } from '../components/KpiRow';
 import { TrendChart } from '../components/TrendChart';
 import { CategoryChart } from '../components/CategoryChart';
 import { BudgetChart } from '../components/BudgetChart';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 const RANGE_LABEL: Record<RangeKey, string> = {
   this_week: 'This Week', this_month: 'This Month', this_year: 'This Year', all_time: 'All Time',
@@ -76,24 +77,25 @@ export function Dashboard() {
 
   return (
     <>
-      <h1>Finance Dashboard</h1>
-      <p className="subtitle">
+      <h1 className="text-2xl font-bold tracking-tight">Finance Dashboard</h1>
+      <p className="mb-5 mt-1 text-sm text-muted-foreground">
         {config.data?.credentials_configured
           ? 'Live view of your budget, computed straight from the database.'
-          : <>⚙ Google Sheets sync isn't configured yet — see <a href="/settings">Settings</a>. The dashboard below still works from local data.</>}
+          : <>⚙ Google Sheets sync isn't configured yet — see <a href="/settings" className="underline underline-offset-2">Settings</a>. The dashboard below still works from local data.</>}
       </p>
 
-      <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
+      <div className="mb-4 flex flex-wrap items-center gap-2">
         <RangeToggle value={range} onChange={setRange} />
         {monthOptions.length > 0 && (
-          <select
-            value={selectedMonth ?? ''}
-            onChange={(e) => setSelectedMonth(e.target.value || null)}
-            style={{ padding: '6px 10px', borderRadius: 999, border: '1px solid var(--grid)', fontSize: 13 }}
-          >
-            <option value="">All months</option>
-            {monthOptions.map((pk) => <option key={pk} value={pk}>{monthLabel(pk)}</option>)}
-          </select>
+          <Select value={selectedMonth ?? '__all__'} onValueChange={(v) => setSelectedMonth(v === '__all__' ? null : v)}>
+            <SelectTrigger size="sm" className="w-[160px]">
+              <SelectValue placeholder="All months" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__all__">All months</SelectItem>
+              {monthOptions.map((pk) => <SelectItem key={pk} value={pk}>{monthLabel(pk)}</SelectItem>)}
+            </SelectContent>
+          </Select>
         )}
       </div>
 
@@ -101,7 +103,7 @@ export function Dashboard() {
       <MetricsRow highlights={highlights.data} />
       <KpiRow tiles={tiles} />
 
-      <div className="chart-grid">
+      <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
         <TrendChart data={trend.data} />
         <CategoryChart tree={categoryTree.data} rangeLabel={categoryLabel} />
         <BudgetChart rows={budget.data} />

@@ -1,3 +1,5 @@
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+
 interface Props {
   options: { type: string; label: string }[];
   value: string;
@@ -6,16 +8,18 @@ interface Props {
 
 export function ChartTypeToggle({ options, value, onChange }: Props) {
   return (
-    <div className="chart-type-toggle">
+    <ToggleGroup
+      type="single"
+      variant="outline"
+      size="sm"
+      value={value}
+      onValueChange={(v) => v && onChange(v)}
+    >
       {options.map((opt) => (
-        <button
-          key={opt.type}
-          className={opt.type === value ? 'active' : ''}
-          onClick={() => onChange(opt.type)}
-        >
+        <ToggleGroupItem key={opt.type} value={opt.type} className="px-2.5 text-xs">
           {opt.label}
-        </button>
+        </ToggleGroupItem>
       ))}
-    </div>
+    </ToggleGroup>
   );
 }

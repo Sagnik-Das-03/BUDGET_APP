@@ -5,6 +5,9 @@ import type { TrendForRange, TrendRow } from '../lib/types';
 import { PALETTE } from '../lib/palette';
 import { ChartTypeToggle } from './ChartTypeToggle';
 import { useLocalStorage } from '../lib/useLocalStorage';
+import { useIsDark } from '@/lib/useIsDark';
+import { chartTheme } from '@/lib/chartTheme';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
 const GRANULARITY_TITLE: Record<string, string> = {
   daily: 'Daily Breakdown (This Week)',
@@ -19,6 +22,8 @@ function rowLabel(row: TrendRow): string {
 
 export function TrendChart({ data }: { data: TrendForRange | undefined }) {
   const [type, setType] = useLocalStorage('dashboard.chartType.trend', 'line');
+  const isDark = useIsDark();
+  const t = chartTheme(isDark);
 
   const option = useMemo<EChartsOption>(() => {
     const rows = data?.rows ?? [];
@@ -30,30 +35,39 @@ export function TrendChart({ data }: { data: TrendForRange | undefined }) {
       lineStyle: { width: 2 }, symbolSize: 6,
     });
     return {
-      tooltip: { trigger: 'axis' },
-      legend: { bottom: 0 },
+      backgroundColor: 'transparent',
+      textStyle: { color: t.text },
+      tooltip: {
+        trigger: 'axis',
+        backgroundColor: t.tooltipBg,
+        borderColor: t.tooltipBorder,
+        textStyle: { color: t.text },
+      },
+      legend: { bottom: 0, textStyle: { color: t.muted } },
       grid: { left: 50, right: 20, top: 20, bottom: 40 },
-      xAxis: { type: 'category', data: labels },
-      yAxis: { type: 'value' },
+      xAxis: { type: 'category', data: labels, axisLine: { lineStyle: { color: t.grid } }, axisLabel: { color: t.muted } },
+      yAxis: { type: 'value', splitLine: { lineStyle: { color: t.grid } }, axisLabel: { color: t.muted } },
       series: [
         mk('Income', rows.map((r) => r.income), PALETTE.income),
         mk('Expenses', rows.map((r) => r.expenses), PALETTE.expenses),
         mk('Net Savings', rows.map((r) => r.net), PALETTE.net),
       ],
     };
-  }, [data, type]);
+  }, [data, type, t]);
 
   return (
-    <div className="chart-card full">
-      <div className="chart-card-head">
-        <h3>{data ? GRANULARITY_TITLE[data.granularity] : 'Trend'}</h3>
+    <Card className="col-span-full">
+      <CardHeader className="flex-row items-center justify-between gap-2 space-y-0">
+        <CardTitle className="text-sm font-semibold">{data ? GRANULARITY_TITLE[data.granularity] : 'Trend'}</CardTitle>
         <ChartTypeToggle
           value={type}
           onChange={setType}
           options={[{ type: 'line', label: 'Line' }, { type: 'bar', label: 'Bar' }]}
         />
-      </div>
-      <ReactECharts option={option} className="echart tall" notMerge />
-    </div>
+      </CardHeader>
+      <CardContent>
+        <ReactECharts option={option} className="w-full h-[340px]" notMerge />
+      </CardContent>
+    </Card>
   );
 }

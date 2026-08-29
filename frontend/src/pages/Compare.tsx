@@ -7,6 +7,11 @@ import { fmtMoney, fmtPct } from '../lib/format';
 import { shiftMonthValue, thisMonthValue } from '../lib/dates';
 import { PeriodPicker, resolvePeriod, type PeriodValue } from '../components/PeriodPicker';
 import { PALETTE } from '../lib/palette';
+import { useIsDark } from '@/lib/useIsDark';
+import { chartTheme } from '@/lib/chartTheme';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { cn } from '@/lib/utils';
 
 const METRICS: { key: 'income' | 'expenses' | 'sip' | 'cash_savings' | 'net'; label: string }[] = [
   { key: 'income', label: 'Income' },
@@ -23,9 +28,13 @@ function deltaPct(a: number, b: number): number | null {
 
 function DeltaCell({ a, b }: { a: number; b: number }) {
   const d = deltaPct(a, b);
-  if (d === null) return <span style={{ color: 'var(--ink-muted)' }}>—</span>;
+  if (d === null) return <span className="text-muted-foreground">—</span>;
   const up = d >= 0;
-  return <span className={up ? 'delta-up' : 'delta-down'}>{up ? '▲' : '▼'} {Math.abs(d * 100).toFixed(1)}%</span>;
+  return (
+    <span className={cn(up ? 'text-emerald-600 dark:text-emerald-400' : 'text-destructive')}>
+      {up ? '▲' : '▼'} {Math.abs(d * 100).toFixed(1)}%
+    </span>
+  );
 }
 
 export function Compare() {
@@ -36,6 +45,8 @@ export function Compare() {
   const [periodB, setPeriodB] = useState<PeriodValue>({
     type: 'month', month: shiftMonthValue(thisMonth, -1), week: '', from: '', to: '',
   });
+  const isDark = useIsDark();
+  const t = chartTheme(isDark);
 
   const resolvedA = resolvePeriod(periodA);
   const resolvedB = resolvePeriod(periodB);
@@ -69,67 +80,81 @@ export function Compare() {
     const byNameA = Object.fromEntries((categoryA.data ?? []).map((c) => [c.category, c.total]));
     const byNameB = Object.fromEntries((categoryB.data ?? []).map((c) => [c.category, c.total]));
     return {
-      tooltip: { trigger: 'axis', valueFormatter: (v) => fmtMoney(v as number) },
-      legend: { bottom: 0 },
+      backgroundColor: 'transparent',
+      textStyle: { color: t.text },
+      tooltip: {
+        trigger: 'axis',
+        valueFormatter: (v) => fmtMoney(v as number),
+        backgroundColor: t.tooltipBg,
+        borderColor: t.tooltipBorder,
+        textStyle: { color: t.text },
+      },
+      legend: { bottom: 0, textStyle: { color: t.muted } },
       grid: { left: 60, right: 20, top: 20, bottom: 60 },
-      xAxis: { type: 'category', data: names, axisLabel: { rotate: 30 } },
-      yAxis: { type: 'value' },
+      xAxis: { type: 'category', data: names, axisLabel: { rotate: 30, color: t.muted }, axisLine: { lineStyle: { color: t.grid } } },
+      yAxis: { type: 'value', splitLine: { lineStyle: { color: t.grid } }, axisLabel: { color: t.muted } },
       series: [
         { name: resolvedA?.label ?? 'Period A', type: 'bar', data: names.map((n) => byNameA[n] ?? 0), color: PALETTE.income, barMaxWidth: 28 },
         { name: resolvedB?.label ?? 'Period B', type: 'bar', data: names.map((n) => byNameB[n] ?? 0), color: PALETTE.expenses, barMaxWidth: 28 },
       ],
     };
-  }, [categoryA.data, categoryB.data, resolvedA, resolvedB]);
+  }, [categoryA.data, categoryB.data, resolvedA, resolvedB, t]);
 
   return (
     <>
-      <h1>Compare</h1>
-      <p className="subtitle">Put any two weeks, months, or custom date ranges side by side.</p>
+      <h1 className="text-2xl font-bold tracking-tight">Compare</h1>
+      <p className="mb-5 mt-1 text-sm text-muted-foreground">Put any two weeks, months, or custom date ranges side by side.</p>
 
-      <div className="chart-grid" style={{ marginBottom: 20 }}>
+      <div className="mb-5 grid grid-cols-1 gap-5 md:grid-cols-2">
         <PeriodPicker title="Period A" value={periodA} onChange={setPeriodA} />
         <PeriodPicker title="Period B" value={periodB} onChange={setPeriodB} />
       </div>
 
       {!resolvedA || !resolvedB ? (
-        <div className="empty-state">Pick a valid range for both periods.</div>
+        <div className="py-8 text-center text-sm text-muted-foreground">Pick a valid range for both periods.</div>
       ) : (
         <>
-          <table style={{ marginBottom: 24 }}>
-            <thead>
-              <tr>
-                <th>Metric</th>
-                <th className="amount">{resolvedA.label}</th>
-                <th className="amount">{resolvedB.label}</th>
-                <th className="amount">Change</th>
-              </tr>
-            </thead>
-            <tbody>
-              {METRICS.map((m) => {
-                const a = summaryA.data?.[m.key] ?? 0;
-                const b = summaryB.data?.[m.key] ?? 0;
-                return (
-                  <tr key={m.key}>
-                    <td>{m.label}</td>
-                    <td className="amount">{fmtMoney(a)}</td>
-                    <td className="amount">{fmtMoney(b)}</td>
-                    <td className="amount"><DeltaCell a={a} b={b} /></td>
-                  </tr>
-                );
-              })}
-              <tr>
-                <td>Savings Rate</td>
-                <td className="amount">{fmtPct(summaryA.data?.savings_rate)}</td>
-                <td className="amount">{fmtPct(summaryB.data?.savings_rate)}</td>
-                <td className="amount">—</td>
-              </tr>
-            </tbody>
-          </table>
+          <Card className="mb-6 py-0">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Metric</TableHead>
+                  <TableHead className="text-right">{resolvedA.label}</TableHead>
+                  <TableHead className="text-right">{resolvedB.label}</TableHead>
+                  <TableHead className="text-right">Change</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {METRICS.map((m) => {
+                  const a = summaryA.data?.[m.key] ?? 0;
+                  const b = summaryB.data?.[m.key] ?? 0;
+                  return (
+                    <TableRow key={m.key}>
+                      <TableCell>{m.label}</TableCell>
+                      <TableCell className="text-right tabular-nums">{fmtMoney(a)}</TableCell>
+                      <TableCell className="text-right tabular-nums">{fmtMoney(b)}</TableCell>
+                      <TableCell className="text-right"><DeltaCell a={a} b={b} /></TableCell>
+                    </TableRow>
+                  );
+                })}
+                <TableRow>
+                  <TableCell>Savings Rate</TableCell>
+                  <TableCell className="text-right tabular-nums">{fmtPct(summaryA.data?.savings_rate)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{fmtPct(summaryB.data?.savings_rate)}</TableCell>
+                  <TableCell className="text-right">—</TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
+          </Card>
 
-          <div className="chart-card full">
-            <h3>Spend by Category: {resolvedA.label} vs {resolvedB.label}</h3>
-            <ReactECharts option={chartOption} className="echart tall" notMerge />
-          </div>
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm font-semibold">Spend by Category: {resolvedA.label} vs {resolvedB.label}</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ReactECharts option={chartOption} className="w-full h-[340px]" notMerge />
+            </CardContent>
+          </Card>
         </>
       )}
     </>
