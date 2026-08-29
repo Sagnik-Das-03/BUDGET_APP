@@ -1,0 +1,11 @@
+.env
+*.json
+!.vscode/*.json
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+data/*.db
+data/*.db-journal
+*.log

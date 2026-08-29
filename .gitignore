@@ -1,0 +1,19 @@
+# Root-level / cross-cutting ignores. backend/.gitignore and frontend/.gitignore
+# cover their own trees in more detail (git respects nested .gitignore files).
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+
+# Defense in depth: never let a credential file slip in from anywhere in the tree,
+# even though the real one (credentials.json) intentionally lives outside this repo.
+credentials.json
+*.pem
+*.key
+service-account*.json
+
+# Claude Code plan files, if ever copied into the repo by accident
+.claude/

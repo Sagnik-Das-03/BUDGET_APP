@@ -1,0 +1,19 @@
+# Rebuilt inside the image - never copy from host
+backend/.venv/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/.pytest_cache/
+frontend/node_modules/
+frontend/dist/
+
+# Secrets and local data - passed in at runtime via env_file/volumes instead
+backend/.env
+backend/data/*.db
+backend/data/*.db-journal
+*.log
+
+# VCS / editor
+.git/
+.gitignore
+.vscode/
+.idea/

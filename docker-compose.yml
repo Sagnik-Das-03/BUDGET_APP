@@ -1,0 +1,28 @@
+services:
+  budget-tracker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    env_file:
+      - backend/.env
+    environment:
+      # Overrides whatever GOOGLE_SERVICE_ACCOUNT_KEY_PATH is in backend/.env -
+      # that file has your Windows host path, which doesn't exist inside the
+      # container. The real key file is bind-mounted below instead.
+      - GOOGLE_SERVICE_ACCOUNT_KEY_PATH=/app/credentials.json
+    volumes:
+      # SQLite data survives container recreation.
+      - ./backend/data:/app/backend/data
+      # Your service account key, read-only. Adjust the source path (left side)
+      # if credentials.json lives somewhere other than one level above this
+      # repo - see backend/docs/service_account_setup.md.
+      - ../credentials.json:/app/credentials.json:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
