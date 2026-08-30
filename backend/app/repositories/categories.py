@@ -9,20 +9,29 @@ from typing import Optional
 # agreed on afterward: SIP and Savings are money that's still yours (invested, or sent
 # to family as pooled household savings) so they're excluded from the Expenses/Net
 # Savings KPI; Gift is for one-way support payments that behave like a real expense.
+#
+# Colors: an 11-hue modern categorical set (validated with the dataviz skill's
+# validate_palette.js against both the light #fcfcfb and dark #1c1b19 chart
+# surfaces - passes lightness band, chroma floor, adjacent CVD separation and
+# contrast as one set in both modes; the CVD check WARNs on one pair in the 6-8
+# floor band, which is legal here since every category name is always shown as
+# a direct label next to its swatch). "Other" is deliberately excluded from that
+# set and kept as neutral muted ink, same precedent as the chart palette's "goal"
+# color - a catch-all bucket doesn't need to compete for hue distinctiveness.
 # (name, color, counts_as_expense)
 DEFAULT_CATEGORIES = [
-    ("Income", "#2A78D6", True),
-    ("Subscriptions", "#EB6834", True),
-    ("Quick-Commerce", "#1BAF7A", True),
-    ("Shopping", "#EDA100", True),
-    ("Food-Order", "#E87BA4", True),
-    ("SIP", "#008300", False),
-    ("Savings", "#0CA30C", False),
-    ("Gift", "#E87BA4", True),
-    ("RENT", "#4A3AA7", True),
-    ("Transport", "#9085E9", True),
-    ("Utilities", "#199E70", True),
-    ("Other", "#E34948", True),
+    ("Income", "#3B82F6", True),
+    ("Subscriptions", "#8B5CF6", True),
+    ("Quick-Commerce", "#0891B2", True),
+    ("Shopping", "#D97706", True),
+    ("Food-Order", "#EC4899", True),
+    ("SIP", "#65A30D", False),
+    ("Savings", "#0D9488", False),
+    ("Gift", "#D946EF", True),
+    ("RENT", "#F43F5E", True),
+    ("Transport", "#6366F1", True),
+    ("Utilities", "#EA580C", True),
+    ("Other", "#898781", True),
 ]
 
 

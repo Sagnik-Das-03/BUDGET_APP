@@ -172,7 +172,7 @@ export function Settings() {
                 return (
                   <TableRow key={c.id}>
                     <TableCell className="pl-6">
-                      <span className="mr-1.5 inline-block size-2.5 rounded-full align-middle" style={{ background: c.color_hex }} /> {c.name}
+                      <span className="mr-1.5 inline-block size-2.5 rounded-full align-middle ring-1 ring-border" style={{ background: c.color_hex }} /> {c.name}
                     </TableCell>
                     <TableCell className="text-right">
                       <Input type="number" step="0.01" min="0" className="ml-auto w-28 text-right"

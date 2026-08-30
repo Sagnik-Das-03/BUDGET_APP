@@ -25,9 +25,13 @@ const METRICS: { key: 'income' | 'expenses' | 'sip' | 'cash_savings' | 'net'; la
   { key: 'net', label: 'Net Savings' },
 ];
 
+// a = Period A (always the primary/current period on this page - the default
+// and every preset set it to "this month"), b = Period B (the older/reference
+// period). Change is expressed as a vs. b, so "up" means "A is higher than B" -
+// not the reverse.
 function deltaPct(a: number, b: number): number | null {
-  if (!a) return null;
-  return (b - a) / Math.abs(a);
+  if (!b) return null;
+  return (a - b) / Math.abs(b);
 }
 
 function DeltaCell({ a, b }: { a: number; b: number }) {
@@ -127,8 +131,11 @@ export function Compare() {
     return names.map((category) => {
       const a = byNameA[category] ?? 0;
       const b = byNameB[category] ?? 0;
-      const delta = b - a;
-      return { category, a, b, delta, deltaPct: a === 0 ? null : delta / a };
+      // a = Period A (current), b = Period B (baseline) - same convention as
+      // DeltaCell above. delta > 0 means A spent more than B (worse, since these
+      // are always expense categories).
+      const delta = a - b;
+      return { category, a, b, delta, deltaPct: b === 0 ? null : delta / b };
     });
   }, [categoryA.data, categoryB.data]);
 
@@ -287,8 +294,10 @@ export function Compare() {
                       row.delta > 0 && 'text-destructive',
                       row.delta < 0 && 'text-emerald-600 dark:text-emerald-400',
                     )}>
-                      {row.a === 0 ? (
+                      {row.b === 0 ? (
                         <span className="text-muted-foreground">New</span>
+                      ) : row.a === 0 ? (
+                        <span className="text-muted-foreground">Gone</span>
                       ) : (
                         `${row.deltaPct! > 0 ? '+' : ''}${(row.deltaPct! * 100).toFixed(0)}%`
                       )}

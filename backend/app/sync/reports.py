@@ -16,13 +16,17 @@ from app.sheets import formatting, mapping
 from app.sheets.adapter import GoogleSheetsService
 from app.utils import period_key_for
 
-INCOME_COLOR = "#2A78D6"
-EXPENSE_COLOR = "#E34948"
-NET_COLOR = "#4A3AA7"
+# Kept in sync by hand with app/api/appearance.py's DEFAULT_PALETTE - this is
+# the fixed fallback baked into the Sheets-side generated native charts, which
+# can't read the user's live palette customization the way the app's own
+# frontend charts do via usePalette().
+INCOME_COLOR = "#3B82F6"
+EXPENSE_COLOR = "#F43F5E"
+NET_COLOR = "#6366F1"
 GOAL_COLOR = "#898781"
-MAGNITUDE_COLOR = "#2A78D6"
-SIP_COLOR = "#008300"
-CASH_SAVINGS_COLOR = "#1BAF7A"
+MAGNITUDE_COLOR = "#3B82F6"
+SIP_COLOR = "#D97706"
+CASH_SAVINGS_COLOR = "#0D9488"
 
 NOTE = "Auto-generated from the app database - do not edit directly. Edit via the app or the Transactions tab."
 
