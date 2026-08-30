@@ -3,12 +3,14 @@ import { useEffect, useState } from 'react';
 import { Trash2, X } from 'lucide-react';
 import { api } from '../lib/api';
 import { fmtMoney } from '../lib/format';
+import type { ChartPalette } from '../lib/types';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { ColorSwatchInput } from '@/components/ColorSwatchInput';
 
 export function Settings() {
   const queryClient = useQueryClient();
@@ -17,6 +19,7 @@ export function Settings() {
   const budgets = useQuery({ queryKey: ['budgets'], queryFn: api.listBudgets });
   const categories = useQuery({ queryKey: ['categories'], queryFn: api.listCategories });
   const accounts = useQuery({ queryKey: ['accounts'], queryFn: api.listAccounts });
+  const palette = useQuery({ queryKey: ['chartPalette'], queryFn: api.getPalette });
 
   const invalidate = (key: string) => queryClient.invalidateQueries({ queryKey: [key] });
 
@@ -62,6 +65,19 @@ export function Settings() {
   const deactivateCategory = useMutation({
     mutationFn: (id: number) => api.deactivateCategory(id),
     onSuccess: () => invalidate('categories'),
+  });
+  const updateCategoryColor = useMutation({
+    mutationFn: ({ id, name, color }: { id: number; name: string; color: string }) => api.updateCategory(id, name, color),
+    onSuccess: () => invalidate('categories'),
+  });
+
+  const setPalette = useMutation({
+    mutationFn: (partial: Partial<ChartPalette>) => api.setPalette(partial),
+    onSuccess: () => invalidate('chartPalette'),
+  });
+  const resetPalette = useMutation({
+    mutationFn: () => api.resetPalette(),
+    onSuccess: () => invalidate('chartPalette'),
   });
 
   const [newAcctName, setNewAcctName] = useState('');
@@ -189,7 +205,12 @@ export function Settings() {
           <div className="flex flex-wrap gap-2">
             {categories.data?.map((c) => (
               <Badge key={c.id} variant="outline" className="gap-1.5 py-1 pl-1 pr-2 text-xs">
-                <span className="inline-block size-2.5 rounded-full" style={{ background: c.color_hex }} />
+                <ColorSwatchInput
+                  size="sm"
+                  value={c.color_hex}
+                  title={`${c.name} color`}
+                  onChange={(color) => updateCategoryColor.mutate({ id: c.id, name: c.name, color })}
+                />
                 {c.name}
                 <button
                   className="ml-0.5 text-muted-foreground hover:text-destructive"
@@ -206,10 +227,34 @@ export function Settings() {
           </div>
           <div className="flex flex-wrap items-center gap-2.5">
             <Input type="text" placeholder="New category name" value={newCatName} onChange={(e) => setNewCatName(e.target.value)} className="w-48" />
-            <input type="color" value={newCatColor} onChange={(e) => setNewCatColor(e.target.value)}
-              className="h-9 w-12 cursor-pointer rounded-md border border-input p-1" />
+            <ColorSwatchInput value={newCatColor} onChange={setNewCatColor} title="New category color" />
             <Button size="sm" disabled={!newCatName.trim()} onClick={() => addCategory.mutate()}>Add Category</Button>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Chart Colors</CardTitle>
+          <CardDescription>Colors used for Income/Expenses/Net Savings/Goal/SIP/Cash Savings across the Dashboard and Compare charts.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex flex-wrap gap-4">
+            {([
+              ['income', 'Income'], ['expenses', 'Expenses'], ['net', 'Net Savings'],
+              ['goal', 'Goal'], ['sip', 'SIP'], ['cash_savings', 'Cash Savings'],
+            ] as [keyof ChartPalette, string][]).map(([key, label]) => (
+              <label key={key} className="flex items-center gap-2 text-sm">
+                <ColorSwatchInput
+                  value={palette.data?.[key] ?? '#898781'}
+                  onChange={(color) => setPalette.mutate({ [key]: color } as Partial<ChartPalette>)}
+                  title={`${label} color`}
+                />
+                {label}
+              </label>
+            ))}
+          </div>
+          <Button size="sm" variant="outline" onClick={() => resetPalette.mutate()}>Reset to defaults</Button>
         </CardContent>
       </Card>
 

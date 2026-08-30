@@ -172,6 +172,15 @@ export interface ImportCommitResult {
   transaction_ids: string[];
 }
 
+export interface ChartPalette {
+  income: string;
+  expenses: string;
+  net: string;
+  goal: string;
+  sip: string;
+  cash_savings: string;
+}
+
 export interface MonthlyBreakdownRow {
   period_key: string;
   income: number;

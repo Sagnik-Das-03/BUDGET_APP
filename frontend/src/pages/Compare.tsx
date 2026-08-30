@@ -6,7 +6,7 @@ import { api } from '../lib/api';
 import { fmtMoney, fmtPct } from '../lib/format';
 import { shiftMonthValue, thisMonthValue } from '../lib/dates';
 import { PeriodPicker, resolvePeriod, type PeriodValue } from '../components/PeriodPicker';
-import { PALETTE } from '../lib/palette';
+import { usePalette } from '../lib/usePalette';
 import { useIsDark } from '@/lib/useIsDark';
 import { chartTheme } from '@/lib/chartTheme';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -47,6 +47,7 @@ export function Compare() {
   });
   const isDark = useIsDark();
   const t = chartTheme(isDark);
+  const palette = usePalette();
 
   const resolvedA = resolvePeriod(periodA);
   const resolvedB = resolvePeriod(periodB);
@@ -94,11 +95,11 @@ export function Compare() {
       xAxis: { type: 'category', data: names, axisLabel: { rotate: 30, color: t.muted }, axisLine: { lineStyle: { color: t.grid } } },
       yAxis: { type: 'value', splitLine: { lineStyle: { color: t.grid } }, axisLabel: { color: t.muted } },
       series: [
-        { name: resolvedA?.label ?? 'Period A', type: 'bar', data: names.map((n) => byNameA[n] ?? 0), color: PALETTE.income, barMaxWidth: 28 },
-        { name: resolvedB?.label ?? 'Period B', type: 'bar', data: names.map((n) => byNameB[n] ?? 0), color: PALETTE.expenses, barMaxWidth: 28 },
+        { name: resolvedA?.label ?? 'Period A', type: 'bar', data: names.map((n) => byNameA[n] ?? 0), color: palette.income, barMaxWidth: 28 },
+        { name: resolvedB?.label ?? 'Period B', type: 'bar', data: names.map((n) => byNameB[n] ?? 0), color: palette.expenses, barMaxWidth: 28 },
       ],
     };
-  }, [categoryA.data, categoryB.data, resolvedA, resolvedB, t]);
+  }, [categoryA.data, categoryB.data, resolvedA, resolvedB, t, palette]);
 
   return (
     <>

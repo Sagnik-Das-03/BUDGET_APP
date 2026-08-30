@@ -141,8 +141,8 @@ export function Transactions() {
               </TableCell></TableRow>
             ) : transactions.data.map((t) => (
               <TableRow key={t.transaction_id}>
-                <TableCell>{t.date}</TableCell>
-                <TableCell>{t.description}</TableCell>
+                <TableCell className="whitespace-nowrap">{t.date}</TableCell>
+                <TableCell className="max-w-[380px] whitespace-normal break-words">{t.description}</TableCell>
                 <TableCell>{t.category}</TableCell>
                 <TableCell>{t.account}</TableCell>
                 <TableCell>{t.transaction_type}</TableCell>

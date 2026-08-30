@@ -2,6 +2,7 @@ from datetime import date
 
 from app.models import TransactionType
 from app.repositories.accounts import AccountRepository
+from app.repositories.app_settings import AppSettingRepository
 from app.repositories.categories import CategoryRepository
 from app.repositories.transactions import TransactionRepository
 
@@ -15,6 +16,31 @@ def test_category_add_and_deactivate(session):
     repo.deactivate(cat.id)
     assert cat not in repo.list()
     assert cat in repo.list(include_inactive=True)
+
+
+def test_category_set_color(session):
+    repo = CategoryRepository(session)
+    cat = repo.add("Pets", "#123456")
+
+    updated = repo.set_color(cat.id, "#ABCDEF")
+    assert updated.color_hex == "#ABCDEF"
+    assert repo.get_by_name("Pets").color_hex == "#ABCDEF"
+    assert repo.set_color(999999, "#000000") is None  # unknown id
+
+
+def test_app_setting_get_set_clear_roundtrip(session):
+    repo = AppSettingRepository(session)
+    assert repo.get("palette.income") is None
+
+    repo.set("palette.income", "#111111")
+    assert repo.get("palette.income") == "#111111"
+
+    repo.set("palette.income", "#222222")  # overwrite, not duplicate
+    assert repo.get("palette.income") == "#222222"
+
+    assert repo.clear("palette.income") is True
+    assert repo.get("palette.income") is None
+    assert repo.clear("palette.income") is False  # already gone
 
 
 def test_transaction_create_update_soft_delete(session):

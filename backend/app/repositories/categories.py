@@ -64,6 +64,14 @@ class CategoryRepository:
         self.session.flush()
         return cat
 
+    def set_color(self, category_id: int, color_hex: str) -> Optional[Category]:
+        cat = self.session.get(Category, category_id)
+        if not cat:
+            return None
+        cat.color_hex = color_hex
+        self.session.flush()
+        return cat
+
     def set_counts_as_expense(self, category_id: int, counts_as_expense: bool) -> Optional[Category]:
         cat = self.session.get(Category, category_id)
         if not cat:

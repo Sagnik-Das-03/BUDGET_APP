@@ -1,6 +1,6 @@
 import type {
   Account, Budget, BudgetAlert, BudgetVsActual, Category, CategoryDrilldownNode,
-  CategoryTotal, ConflictRow, Highlights, ImportCommitResult, ImportPreviewResult, ImportRowIn,
+  CategoryTotal, ChartPalette, ConflictRow, Highlights, ImportCommitResult, ImportPreviewResult, ImportRowIn,
   MonthlyBreakdownRow, SavingsGoalProgress, SyncConfig, SyncLogEntry,
   SyncStatus, Totals, Transaction, TrendForRange,
 } from './types';
@@ -66,6 +66,8 @@ export const api = {
   listCategories: () => request<Category[]>('/api/categories'),
   addCategory: (name: string, color_hex: string) =>
     request<Category>('/api/categories', { method: 'POST', body: JSON.stringify({ name, color_hex }) }),
+  updateCategory: (id: number, name: string, color_hex: string) =>
+    request<Category>(`/api/categories/${id}`, { method: 'PUT', body: JSON.stringify({ name, color_hex }) }),
   deactivateCategory: (id: number) => request(`/api/categories/${id}`, { method: 'DELETE' }),
   listAccounts: () => request<Account[]>('/api/accounts'),
   addAccount: (name: string) => request<Account>('/api/accounts', { method: 'POST', body: JSON.stringify({ name }) }),
@@ -79,6 +81,12 @@ export const api = {
   deleteTransaction: (id: string) => request(`/api/transactions/${id}`, { method: 'DELETE' }),
   deletePendingTransactions: () =>
     request<{ hard_deleted: number; soft_deleted: number; total: number }>('/api/transactions/pending', { method: 'DELETE' }),
+
+  // ---------- appearance ----------
+  getPalette: () => request<ChartPalette>('/api/appearance/palette'),
+  setPalette: (partial: Partial<ChartPalette>) =>
+    request<ChartPalette>('/api/appearance/palette', { method: 'PUT', body: JSON.stringify(partial) }),
+  resetPalette: () => request<ChartPalette>('/api/appearance/palette', { method: 'DELETE' }),
 
   // ---------- csv import ----------
   importPreview: async (file: File) => {

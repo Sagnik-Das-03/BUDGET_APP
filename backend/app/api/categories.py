@@ -21,10 +21,12 @@ def add_category(payload: CategoryIn, session: Session = Depends(get_session)):
 
 
 @router.put("/{category_id}", response_model=CategoryOut)
-def rename_category(category_id: int, payload: CategoryIn, session: Session = Depends(get_session)):
-    cat = CategoryRepository(session).rename(category_id, payload.name)
+def update_category(category_id: int, payload: CategoryIn, session: Session = Depends(get_session)):
+    repo = CategoryRepository(session)
+    cat = repo.rename(category_id, payload.name)
     if not cat:
         raise HTTPException(404, "Category not found")
+    repo.set_color(category_id, payload.color_hex)
     session.commit()
     return cat
 

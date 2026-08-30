@@ -2,7 +2,7 @@ import ReactECharts from 'echarts-for-react';
 import { useMemo } from 'react';
 import type { EChartsOption } from 'echarts';
 import type { BudgetVsActual } from '../lib/types';
-import { PALETTE } from '../lib/palette';
+import { usePalette } from '../lib/usePalette';
 import { ChartTypeToggle } from './ChartTypeToggle';
 import { useLocalStorage } from '../lib/useLocalStorage';
 import { useIsDark } from '@/lib/useIsDark';
@@ -13,6 +13,7 @@ export function BudgetChart({ rows }: { rows: BudgetVsActual[] | undefined }) {
   const [type, setType] = useLocalStorage('dashboard.chartType.budget', 'bar');
   const isDark = useIsDark();
   const t = chartTheme(isDark);
+  const palette = usePalette();
 
   const option = useMemo<EChartsOption>(() => {
     const data = rows ?? [];
@@ -37,11 +38,11 @@ export function BudgetChart({ rows }: { rows: BudgetVsActual[] | undefined }) {
         ? { type: 'category', data: names, axisLabel: { color: t.muted }, axisLine: { lineStyle: { color: t.grid } } }
         : { type: 'value', splitLine: { lineStyle: { color: t.grid } }, axisLabel: { color: t.muted } },
       series: [
-        { name: 'Goal', type: 'bar', data: data.map((r) => r.goal), color: PALETTE.goal, barMaxWidth: 22 },
-        { name: 'Actual', type: 'bar', data: data.map((r) => r.actual), color: PALETTE.income, barMaxWidth: 22 },
+        { name: 'Goal', type: 'bar', data: data.map((r) => r.goal), color: palette.goal, barMaxWidth: 22 },
+        { name: 'Actual', type: 'bar', data: data.map((r) => r.actual), color: palette.income, barMaxWidth: 22 },
       ],
     };
-  }, [rows, type, t]);
+  }, [rows, type, t, palette]);
 
   return (
     <Card>

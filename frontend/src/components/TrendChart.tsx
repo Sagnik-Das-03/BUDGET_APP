@@ -2,7 +2,7 @@ import ReactECharts from 'echarts-for-react';
 import { useMemo } from 'react';
 import type { EChartsOption } from 'echarts';
 import type { TrendForRange, TrendRow } from '../lib/types';
-import { PALETTE } from '../lib/palette';
+import { usePalette } from '../lib/usePalette';
 import { ChartTypeToggle } from './ChartTypeToggle';
 import { useLocalStorage } from '../lib/useLocalStorage';
 import { useIsDark } from '@/lib/useIsDark';
@@ -24,6 +24,7 @@ export function TrendChart({ data }: { data: TrendForRange | undefined }) {
   const [type, setType] = useLocalStorage('dashboard.chartType.trend', 'line');
   const isDark = useIsDark();
   const t = chartTheme(isDark);
+  const palette = usePalette();
 
   const option = useMemo<EChartsOption>(() => {
     const rows = data?.rows ?? [];
@@ -48,12 +49,12 @@ export function TrendChart({ data }: { data: TrendForRange | undefined }) {
       xAxis: { type: 'category', data: labels, axisLine: { lineStyle: { color: t.grid } }, axisLabel: { color: t.muted } },
       yAxis: { type: 'value', splitLine: { lineStyle: { color: t.grid } }, axisLabel: { color: t.muted } },
       series: [
-        mk('Income', rows.map((r) => r.income), PALETTE.income),
-        mk('Expenses', rows.map((r) => r.expenses), PALETTE.expenses),
-        mk('Net Savings', rows.map((r) => r.net), PALETTE.net),
+        mk('Income', rows.map((r) => r.income), palette.income),
+        mk('Expenses', rows.map((r) => r.expenses), palette.expenses),
+        mk('Net Savings', rows.map((r) => r.net), palette.net),
       ],
     };
-  }, [data, type, t]);
+  }, [data, type, t, palette]);
 
   return (
     <Card className="col-span-full">
