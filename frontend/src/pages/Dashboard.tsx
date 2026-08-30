@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { api, type DateBounds } from '../lib/api';
 import { fmtMoney, fmtPct } from '../lib/format';
 import { monthBounds, monthLabel, yearBounds } from '../lib/dates';
@@ -89,6 +89,29 @@ export function Dashboard() {
   const goalCls = g?.status === 'met' ? 'met' : g?.status === 'behind' ? 'behind' : '';
   const goalIcon = g?.status === 'met' ? '✓' : g?.status === 'behind' ? '⚠' : '';
 
+  // Aggregate budget utilization: total actual spend vs total goal, across every
+  // category that actually has a goal set - reuses the same query BudgetChart
+  // already fetches, no extra API call.
+  const budgetUtilization = useMemo(() => {
+    const budgeted = (budget.data ?? []).filter((r) => r.goal > 0);
+    if (!budgeted.length) return null;
+    const totalGoal = budgeted.reduce((sum, r) => sum + r.goal, 0);
+    const totalActual = budgeted.reduce((sum, r) => sum + r.actual, 0);
+    return { totalGoal, totalActual, pct: totalGoal ? totalActual / totalGoal : 0 };
+  }, [budget.data]);
+
+  // Single biggest transaction in the current range, flattened out of the same
+  // category drill-down tree CategoryChart already fetches.
+  const largestExpense = useMemo(() => {
+    let best: { name: string; value: number; category: string } | null = null;
+    for (const node of categoryTree.data ?? []) {
+      for (const child of node.children) {
+        if (!best || child.value > best.value) best = { name: child.name, value: child.value, category: node.name };
+      }
+    }
+    return best;
+  }, [categoryTree.data]);
+
   const tiles: KpiTileData[] = [
     { id: 'income', label: 'Income', value: fmtMoney(s?.income) },
     { id: 'expenses', label: 'Expenses', value: fmtMoney(s?.expenses) },
@@ -102,6 +125,19 @@ export function Dashboard() {
       } : undefined,
     },
     { id: 'rate', label: 'Savings Rate', value: fmtPct(s?.savings_rate) },
+    {
+      id: 'budget-utilization', label: 'Budget Utilization',
+      value: budgetUtilization ? fmtPct(budgetUtilization.pct) : '—',
+      sub: budgetUtilization ? {
+        text: `${fmtMoney(budgetUtilization.totalActual)} of ${fmtMoney(budgetUtilization.totalGoal)} budgeted`,
+        className: budgetUtilization.pct >= 1 ? 'behind' : undefined,
+      } : undefined,
+    },
+    {
+      id: 'largest-expense', label: 'Largest Expense',
+      value: largestExpense ? fmtMoney(largestExpense.value) : '—',
+      sub: largestExpense ? { text: `${largestExpense.name} · ${largestExpense.category}` } : undefined,
+    },
   ];
 
   const monthOptions = range === 'this_year' && trend.data?.granularity === 'monthly'
