@@ -3,6 +3,7 @@ Summary, Dashboard) from the current DB state - human-readable formatting + nati
 charts, reusing the validated color palette from the earlier xlsx dashboard work.
 Called at the end of every sync cycle that actually changed something, so these
 views can never drift from the canonical Transactions tab."""
+import time
 from datetime import date as date_type
 
 from sqlalchemy import select
@@ -24,6 +25,12 @@ SIP_COLOR = "#008300"
 CASH_SAVINGS_COLOR = "#1BAF7A"
 
 NOTE = "Auto-generated from the app database - do not edit directly. Edit via the app or the Transactions tab."
+
+# Each _rewrite_tab() call costs ~5 Sheets API write requests (clear, write, format,
+# chart delete, chart add). The write quota is 60/minute *per user* - at ~1 write/sec
+# sustained that's one tab roughly every 5 seconds, so pace tabs at that interval
+# rather than firing all of them back-to-back and tripping a 429 mid-regeneration.
+TAB_WRITE_PACING_SECONDS = 5.0
 
 
 def format_transactions_header(sheets: GoogleSheetsService, spreadsheet_id: str) -> None:
@@ -55,6 +62,7 @@ def _rewrite_tab(sheets: GoogleSheetsService, spreadsheet_id: str, tab_name: str
         sheets.batch_format(spreadsheet_id, [
             formatting.basic_chart_request(sheet_id=sheet_id, **spec) for spec in chart_specs
         ])
+    time.sleep(TAB_WRITE_PACING_SECONDS)
     return sheet_id
 
 

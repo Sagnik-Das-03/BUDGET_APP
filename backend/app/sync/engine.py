@@ -157,14 +157,31 @@ def run_sync_cycle(session: Session, sheets: GoogleSheetsService, spreadsheet_id
         session.commit()
         summary["errors"].append(f"periods: {e}")
 
-    try:
-        report_result = reports_mod.regenerate_all(session, sheets, spreadsheet_id)
-        summary["reports"] = report_result
-    except Exception as e:
-        logger.exception("report regeneration failed")
-        sync_repo.log(f"Report regeneration failed: {e}", LogLevel.error)
-        session.commit()
-        summary["errors"].append(f"reports: {e}")
+    # Regenerating every report tab costs ~5 Sheets API writes each (21 tabs at the
+    # time of writing) - firing that on every cycle regardless of whether anything
+    # actually changed is what was blowing through the 60-writes-per-minute-per-user
+    # quota on quiet cycles that had nothing to report. Only run it when something
+    # this cycle could plausibly have changed what a report would show.
+    pull_counts = summary.get("pull") or {}
+    push_counts = summary.get("push") or {}
+    data_changed = (
+        pull_counts.get("created", 0) > 0
+        or pull_counts.get("updated", 0) > 0
+        or pull_counts.get("conflict", 0) > 0
+        or push_counts.get("pushed", 0) > 0
+        or bool(summary["periods_discovered"])
+    )
+    if data_changed:
+        try:
+            report_result = reports_mod.regenerate_all(session, sheets, spreadsheet_id)
+            summary["reports"] = report_result
+        except Exception as e:
+            logger.exception("report regeneration failed")
+            sync_repo.log(f"Report regeneration failed: {e}", LogLevel.error)
+            session.commit()
+            summary["errors"].append(f"reports: {e}")
+    else:
+        summary["reports"] = "skipped (nothing changed this cycle)"
 
     sync_repo.touch_meta(spreadsheet_id, TRANSACTIONS_SHEET)
     level = LogLevel.error if summary["errors"] else LogLevel.info

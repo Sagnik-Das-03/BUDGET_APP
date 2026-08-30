@@ -5,7 +5,8 @@ from app.repositories.accounts import AccountRepository
 from app.repositories.categories import CategoryRepository
 from app.repositories.transactions import TransactionRepository
 from app.sheets import mapping
-from app.sync.engine import pull, push
+from app.sync import engine as engine_mod
+from app.sync.engine import pull, push, run_sync_cycle
 
 SPREADSHEET_ID = "fake-id"
 
@@ -69,6 +70,33 @@ def test_push_does_not_duplicate_when_retried_after_partial_failure(session, she
     assert len(matching) == 1, "transaction must appear exactly once in the sheet, not duplicated"
     assert tx_repo.get_by_transaction_id(txn.transaction_id).sync_status == SyncStatus.synced
     assert push_result["appended"] == 0
+
+
+def test_run_sync_cycle_skips_report_regeneration_when_nothing_changed(session, sheets, monkeypatch):
+    """Regression test: report regeneration used to fire on every cycle regardless
+    of whether anything changed, which is what was blowing through the Sheets API's
+    60-writes-per-minute-per-user quota on quiet cycles with nothing to report."""
+    calls = []
+    monkeypatch.setattr(engine_mod.reports_mod, "regenerate_all", lambda *a, **k: calls.append(1))
+
+    run_sync_cycle(session, sheets, SPREADSHEET_ID)  # empty sheet, empty DB - nothing to sync
+
+    assert calls == []
+
+
+def test_run_sync_cycle_runs_report_regeneration_when_something_changed(session, sheets, monkeypatch):
+    calls = []
+    monkeypatch.setattr(engine_mod.reports_mod, "regenerate_all", lambda *a, **k: calls.append(1) or {"stub": True})
+
+    cat_repo, acct_repo, tx_repo = CategoryRepository(session), AccountRepository(session), TransactionRepository(session)
+    category, account = cat_repo.get_by_name("Shopping"), acct_repo.get_or_create("Primary")
+    tx_repo.create(date=date(2026, 9, 1), description="Coffee", amount=100.0,
+                    transaction_type=TransactionType.expense, category=category, account=account)
+    session.commit()
+
+    run_sync_cycle(session, sheets, SPREADSHEET_ID)  # the new pending transaction should get pushed
+
+    assert calls == [1]
 
 
 def test_deleting_an_already_synced_transaction_pushes_the_deletion(session, sheets):
