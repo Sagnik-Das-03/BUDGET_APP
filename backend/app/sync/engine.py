@@ -184,7 +184,13 @@ def run_sync_cycle(session: Session, sheets: GoogleSheetsService, spreadsheet_id
         summary["reports"] = "skipped (nothing changed this cycle)"
 
     sync_repo.touch_meta(spreadsheet_id, TRANSACTIONS_SHEET)
-    level = LogLevel.error if summary["errors"] else LogLevel.info
-    sync_repo.log(f"Sync cycle complete: {dict(summary)}", level)
+    # pull() still has to run every cycle regardless (it's the only way to notice
+    # something added outside the app - the mobile quick-add form, a manual sheet
+    # edit) - but a cycle that finds and pushes nothing doesn't need to log
+    # "complete" every time either; that was drowning real activity in noise on
+    # the Logs page. Errors always log, changed or not.
+    if data_changed or summary["errors"]:
+        level = LogLevel.error if summary["errors"] else LogLevel.info
+        sync_repo.log(f"Sync cycle complete: {dict(summary)}", level)
     session.commit()
     return summary

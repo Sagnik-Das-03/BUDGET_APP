@@ -4,6 +4,7 @@ from app.models import SyncStatus, TransactionType
 from app.repositories.accounts import AccountRepository
 from app.repositories.categories import CategoryRepository
 from app.repositories.transactions import TransactionRepository
+from app.repositories.sync import SyncRepository
 from app.sheets import mapping
 from app.sync import engine as engine_mod
 from app.sync.engine import pull, push, run_sync_cycle
@@ -82,6 +83,36 @@ def test_run_sync_cycle_skips_report_regeneration_when_nothing_changed(session, 
     run_sync_cycle(session, sheets, SPREADSHEET_ID)  # empty sheet, empty DB - nothing to sync
 
     assert calls == []
+
+
+def test_run_sync_cycle_skips_log_entry_when_nothing_changed(session, sheets, monkeypatch):
+    """A quiet cycle that finds nothing to pull or push shouldn't add a 'Sync
+    cycle complete' entry every time - that was drowning real activity in noise
+    on the Logs page. touch_meta() (last-synced-at) still updates regardless,
+    since that reflects "we checked", not "something happened"."""
+    monkeypatch.setattr(engine_mod.reports_mod, "regenerate_all", lambda *a, **k: {"stub": True})
+
+    before = len(SyncRepository(session).recent_logs())
+    run_sync_cycle(session, sheets, SPREADSHEET_ID)  # empty sheet, empty DB - nothing to sync
+    after = SyncRepository(session).recent_logs()
+
+    assert len(after) == before  # no new log entry
+    assert SyncRepository(session).get_meta(SPREADSHEET_ID, "Transactions") is not None  # but meta still touched
+
+
+def test_run_sync_cycle_logs_when_something_changed(session, sheets, monkeypatch):
+    monkeypatch.setattr(engine_mod.reports_mod, "regenerate_all", lambda *a, **k: {"stub": True})
+
+    cat_repo, acct_repo, tx_repo = CategoryRepository(session), AccountRepository(session), TransactionRepository(session)
+    category, account = cat_repo.get_by_name("Shopping"), acct_repo.get_or_create("Primary")
+    tx_repo.create(date=date(2026, 9, 1), description="Coffee", amount=100.0,
+                    transaction_type=TransactionType.expense, category=category, account=account)
+    session.commit()
+
+    run_sync_cycle(session, sheets, SPREADSHEET_ID)
+
+    logs = SyncRepository(session).recent_logs()
+    assert any("Sync cycle complete" in l.message for l in logs)
 
 
 def test_run_sync_cycle_runs_report_regeneration_when_something_changed(session, sheets, monkeypatch):
