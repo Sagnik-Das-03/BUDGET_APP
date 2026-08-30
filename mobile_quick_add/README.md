@@ -9,14 +9,18 @@ next sync it assigns a real ID, fills in the Month column, and pulls it into
 your local database, exactly like editing the sheet by hand would. Nothing in
 the backend or frontend needed to change for this to work.
 
-Still not a mobile dashboard — no charts, no deleting. What it does show, read
-straight off the sheet on page load and refreshed after every add/edit: this
+Still not a mobile dashboard — no charts. What it does show, read straight off
+the sheet on page load and refreshed after every add/edit/delete: this
 calendar month's Income/Expenses/Net, and the 8 most recent transactions
-(deleted rows excluded from both). Each recent transaction has an **Edit**
-link that pre-fills the form from that row (by its sheet row number) and
-switches the button to "Save Changes" — editing intentionally leaves the
-Transaction ID cell untouched, so the app's sync engine treats it as an
-update to the existing transaction rather than a new one.
+(deleted rows excluded from both). Each recent transaction has:
+- an **Edit** link that pre-fills the form from that row (by its sheet row
+  number) and switches the button to "Save Changes" — editing intentionally
+  leaves the Transaction ID cell untouched, so the app's sync engine treats it
+  as an update to the existing transaction rather than a new one.
+- a **Delete** link (with a confirm prompt) that sets the row's `Deleted`
+  cell to `TRUE` rather than removing the row - the app's sync engine only
+  ever notices a deletion via that column, not via a row disappearing, so
+  physically deleting it here would leave the app never finding out.
 
 ## Deploy it (one-time, ~5 minutes)
 

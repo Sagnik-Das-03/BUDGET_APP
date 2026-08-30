@@ -218,3 +218,20 @@ function updateTransaction(rowNumber, payload) {
 
   return { ok: true };
 }
+
+/** Soft-deletes a row by setting its Deleted cell to TRUE - deliberately does
+ * NOT remove the row. The app's sync engine only ever notices a deletion via
+ * that column (pull() has no logic for "a row vanished from the sheet"), so
+ * physically deleting the row here would leave the app never knowing. */
+function deleteTransaction(rowNumber) {
+  if (!rowNumber || rowNumber < 2) throw new Error('Invalid row.');
+
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME);
+  if (rowNumber > sheet.getLastRow()) {
+    throw new Error('That transaction no longer exists at that row - refresh and try again.');
+  }
+  const idx = headerIndex_(sheet);
+  sheet.getRange(rowNumber, idx.deleted + 1).setValue('TRUE');
+
+  return { ok: true };
+}
