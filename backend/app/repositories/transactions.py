@@ -174,6 +174,18 @@ class TransactionRepository:
         self.session.flush()
         return txn
 
+    def bulk_soft_delete(self, transaction_ids: list[str]) -> int:
+        """Soft-deletes each id, same as calling soft_delete() once per id.
+        Returns how many ids actually matched a transaction - can be less than
+        len(transaction_ids) if some no longer exist (e.g. already hard-deleted
+        by delete_all_pending, or the id was simply wrong)."""
+        count = 0
+        for tid in transaction_ids:
+            txn = self.soft_delete(tid)
+            if txn is not None:
+                count += 1
+        return count
+
     def delete_all_pending(self) -> dict:
         """Bulk-deletes every active transaction currently sitting in pending/error
         sync state - e.g. to discard a bad CSV import before it ever reaches Sheets.

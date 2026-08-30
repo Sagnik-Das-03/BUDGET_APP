@@ -149,14 +149,38 @@
     .recent-item .meta { min-width: 0; }
     .recent-item .desc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .recent-item .sub { font-size: 11px; color: var(--ink-muted); }
+    .recent-item .right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
     .recent-item .amt { font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
     .recent-item .amt.expense { color: var(--red-ink); }
     .recent-item .amt.income { color: var(--green-ink); }
+    .recent-item .edit-btn {
+      border: none;
+      background: none;
+      color: var(--blue);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      padding: 4px 0 4px 4px;
+    }
     .empty-hint { font-size: 13px; color: var(--ink-muted); }
+    .form-actions { display: flex; gap: 8px; }
+    .form-actions .submit { flex: 1; }
+    button.cancel {
+      padding: 13px 16px;
+      border-radius: 9px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--ink-muted);
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      display: none;
+    }
+    button.cancel.show { display: block; }
   </style>
 </head>
 <body>
-  <h1>Add Transaction</h1>
+  <h1 id="formTitle">Add Transaction</h1>
 
   <div class="card">
     <h2>This Month</h2>
@@ -209,7 +233,10 @@
       <input id="notes" type="text" autocomplete="off">
     </div>
 
-    <button type="submit" class="submit" id="submitBtn">Add Transaction</button>
+    <div class="form-actions">
+      <button type="submit" class="submit" id="submitBtn">Add Transaction</button>
+      <button type="button" class="cancel" id="cancelBtn">Cancel</button>
+    </div>
   </form>
 
   <div class="card">
@@ -221,16 +248,57 @@
     const form = document.getElementById('txnForm');
     const banner = document.getElementById('banner');
     const submitBtn = document.getElementById('submitBtn');
+    const cancelBtn = document.getElementById('cancelBtn');
+    const formTitle = document.getElementById('formTitle');
     const typeButtons = document.querySelectorAll('.type-toggle button');
     let currentType = 'Expense';
+    let editingRow = null;
 
     document.getElementById('date').valueAsDate = new Date();
 
+    function setType(type) {
+      currentType = type;
+      typeButtons.forEach((b) => b.classList.toggle('active', b.dataset.type === type));
+    }
+
+    function startEdit(rowNumber) {
+      google.script.run
+        .withSuccessHandler((data) => {
+          editingRow = data.rowNumber;
+          document.getElementById('description').value = data.description;
+          document.getElementById('amount').value = data.amount;
+          document.getElementById('date').value = data.date;
+          document.getElementById('category').value = data.category;
+          document.getElementById('account').value = data.account;
+          document.getElementById('notes').value = data.notes;
+          setType(data.type === 'Income' ? 'Income' : 'Expense');
+
+          formTitle.textContent = 'Edit Transaction';
+          submitBtn.textContent = 'Save Changes';
+          cancelBtn.classList.add('show');
+          banner.className = 'banner';
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        })
+        .withFailureHandler((err) => showBanner('error', err.message || String(err)))
+        .getTransactionByRow(rowNumber);
+    }
+
+    function exitEditMode() {
+      editingRow = null;
+      form.reset();
+      document.getElementById('date').valueAsDate = new Date();
+      setType('Expense');
+      formTitle.textContent = 'Add Transaction';
+      submitBtn.textContent = 'Add Transaction';
+      submitBtn.disabled = false;
+      cancelBtn.classList.remove('show');
+      banner.className = 'banner';
+    }
+
+    cancelBtn.addEventListener('click', exitEditMode);
+
     typeButtons.forEach((btn) => {
-      btn.addEventListener('click', () => {
-        currentType = btn.dataset.type;
-        typeButtons.forEach((b) => b.classList.toggle('active', b === btn));
-      });
+      btn.addEventListener('click', () => setType(btn.dataset.type));
     });
 
     google.script.run.withSuccessHandler((opts) => {
@@ -268,9 +336,16 @@
           + '<div class="desc">' + escapeHtml(r.description) + '</div>'
           + '<div class="sub">' + escapeHtml(r.date) + (r.category ? ' · ' + escapeHtml(r.category) : '') + '</div>'
           + '</div>'
+          + '<div class="right">'
           + '<div class="amt ' + (isExpense ? 'expense' : 'income') + '">' + sign + money(r.amount) + '</div>'
+          + '<button type="button" class="edit-btn" data-row="' + r.rowNumber + '">Edit</button>'
+          + '</div>'
           + '</div>';
       }).join('');
+
+      list.querySelectorAll('.edit-btn').forEach((btn) => {
+        btn.addEventListener('click', () => startEdit(Number(btn.dataset.row)));
+      });
     }
 
     function escapeHtml(s) {
@@ -289,8 +364,9 @@
 
     form.addEventListener('submit', (e) => {
       e.preventDefault();
+      const isEditing = editingRow !== null;
       submitBtn.disabled = true;
-      submitBtn.textContent = 'Saving…';
+      submitBtn.textContent = isEditing ? 'Saving…' : 'Adding…';
       banner.className = 'banner';
 
       const payload = {
@@ -303,22 +379,33 @@
         notes: document.getElementById('notes').value,
       };
 
-      google.script.run
-        .withSuccessHandler(() => {
+      const onSuccess = () => {
+        if (isEditing) {
+          exitEditMode();
+          showBanner('success', 'Saved — the change will show up in the app on the next sync.');
+        } else {
           showBanner('success', 'Added — it will show up in the app on the next sync.');
           document.getElementById('description').value = '';
           document.getElementById('amount').value = '';
           document.getElementById('notes').value = '';
           submitBtn.disabled = false;
           submitBtn.textContent = 'Add Transaction';
-          loadSummary();
-        })
-        .withFailureHandler((err) => {
-          showBanner('error', err.message || String(err));
-          submitBtn.disabled = false;
-          submitBtn.textContent = 'Add Transaction';
-        })
-        .submitTransaction(payload);
+        }
+        loadSummary();
+      };
+
+      const onFailure = (err) => {
+        showBanner('error', err.message || String(err));
+        submitBtn.disabled = false;
+        submitBtn.textContent = isEditing ? 'Save Changes' : 'Add Transaction';
+      };
+
+      const runner = google.script.run.withSuccessHandler(onSuccess).withFailureHandler(onFailure);
+      if (isEditing) {
+        runner.updateTransaction(editingRow, payload);
+      } else {
+        runner.submitTransaction(payload);
+      }
     });
   </script>
 </body>

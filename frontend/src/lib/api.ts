@@ -79,6 +79,8 @@ export const api = {
   createTransaction: (payload: Record<string, unknown>) =>
     request<Transaction>('/api/transactions', { method: 'POST', body: JSON.stringify(payload) }),
   deleteTransaction: (id: string) => request(`/api/transactions/${id}`, { method: 'DELETE' }),
+  bulkDeleteTransactions: (transaction_ids: string[]) =>
+    request<{ deleted_count: number }>('/api/transactions/bulk_delete', { method: 'POST', body: JSON.stringify({ transaction_ids }) }),
   deletePendingTransactions: () =>
     request<{ hard_deleted: number; soft_deleted: number; total: number }>('/api/transactions/pending', { method: 'DELETE' }),
 

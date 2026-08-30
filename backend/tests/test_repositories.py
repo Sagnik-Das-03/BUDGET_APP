@@ -64,6 +64,26 @@ def test_transaction_create_update_soft_delete(session):
     assert txn.transaction_id not in [t.transaction_id for t in tx_repo.filter()]
 
 
+def test_bulk_soft_delete_deletes_matching_ids_and_counts_only_those(session):
+    cat_repo, acct_repo, tx_repo = CategoryRepository(session), AccountRepository(session), TransactionRepository(session)
+    category, account = cat_repo.get_by_name("Shopping"), acct_repo.get_or_create("Primary")
+
+    t1 = tx_repo.create(date=date(2026, 9, 1), description="A", amount=10, transaction_type=TransactionType.expense,
+                         category=category, account=account)
+    t2 = tx_repo.create(date=date(2026, 9, 2), description="B", amount=20, transaction_type=TransactionType.expense,
+                         category=category, account=account)
+    t3 = tx_repo.create(date=date(2026, 9, 3), description="C", amount=30, transaction_type=TransactionType.expense,
+                         category=category, account=account)
+
+    count = tx_repo.bulk_soft_delete([t1.transaction_id, t3.transaction_id, "TXN-2026-999999"])
+
+    assert count == 2  # the bogus id doesn't count
+    active_ids = [t.transaction_id for t in tx_repo.filter()]
+    assert t1.transaction_id not in active_ids
+    assert t3.transaction_id not in active_ids
+    assert t2.transaction_id in active_ids  # untouched
+
+
 def test_delete_all_pending_hard_deletes_never_synced_rows(session):
     cat_repo, acct_repo, tx_repo = CategoryRepository(session), AccountRepository(session), TransactionRepository(session)
     category, account = cat_repo.get_by_name("Shopping"), acct_repo.get_or_create("Primary")

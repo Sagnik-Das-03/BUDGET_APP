@@ -8,7 +8,7 @@ from app.models import Account, Category, Transaction, TransactionType
 from app.repositories.accounts import AccountRepository
 from app.repositories.categories import CategoryRepository
 from app.repositories.transactions import TransactionRepository
-from app.schemas import TransactionIn, TransactionOut
+from app.schemas import BulkDeleteIn, TransactionIn, TransactionOut
 from typing import Optional
 
 router = APIRouter(prefix="/api/transactions", tags=["transactions"])
@@ -54,6 +54,13 @@ def create_transaction(payload: TransactionIn, session: Session = Depends(get_se
     )
     session.commit()
     return _to_out(txn)
+
+
+@router.post("/bulk_delete")
+def bulk_delete_transactions(payload: BulkDeleteIn, session: Session = Depends(get_session)):
+    count = TransactionRepository(session).bulk_soft_delete(payload.transaction_ids)
+    session.commit()
+    return {"deleted_count": count}
 
 
 @router.delete("/pending")

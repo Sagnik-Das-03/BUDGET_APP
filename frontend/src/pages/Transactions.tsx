@@ -1,12 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
-import { Plus } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { Plus, Trash2 } from 'lucide-react';
 import { api } from '../lib/api';
 import { fmtMoney } from '../lib/format';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
@@ -28,6 +29,7 @@ export function Transactions() {
   const [search, setSearch] = useState('');
   const [appliedFilters, setAppliedFilters] = useState({});
   const [showAddForm, setShowAddForm] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [newTxn, setNewTxn] = useState({
     date: new Date().toISOString().slice(0, 10), description: '', amount: '',
     transaction_type: 'Expense', category: '', account: 'Primary',
@@ -44,6 +46,39 @@ export function Transactions() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['transactions'] }),
   });
 
+  const bulkDelete = useMutation({
+    mutationFn: (ids: string[]) => api.bulkDeleteTransactions(ids),
+    onSuccess: () => {
+      setSelected(new Set());
+      queryClient.invalidateQueries({ queryKey: ['transactions'] });
+    },
+  });
+
+  function toggleRow(id: string, checked: boolean) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(id); else next.delete(id);
+      return next;
+    });
+  }
+
+  function toggleAll(checked: boolean) {
+    setSelected(checked ? new Set(transactions.data?.map((t) => t.transaction_id)) : new Set());
+  }
+
+  const allVisibleSelected = !!transactions.data?.length && transactions.data.every((t) => selected.has(t.transaction_id));
+
+  const filteredTotals = useMemo(() => {
+    const rows = transactions.data ?? [];
+    let income = 0;
+    let expenses = 0;
+    for (const t of rows) {
+      if (t.transaction_type === 'Income') income += t.amount;
+      else expenses += t.amount;
+    }
+    return { count: rows.length, income, expenses, net: income - expenses };
+  }, [transactions.data]);
+
   const createTxn = useMutation({
     mutationFn: () => api.createTransaction({ ...newTxn, amount: parseFloat(newTxn.amount) }),
     onSuccess: () => {
@@ -57,6 +92,7 @@ export function Transactions() {
       year: year || undefined, month: month || undefined, category: category || undefined,
       type: type || undefined, search: search || undefined,
     });
+    setSelected(new Set());
   }
 
   return (
@@ -95,6 +131,33 @@ export function Transactions() {
         </Button>
       </div>
 
+      <div className="mb-4 flex flex-wrap items-center gap-x-5 gap-y-1 text-sm text-muted-foreground">
+        <span>{filteredTotals.count} transaction{filteredTotals.count === 1 ? '' : 's'}</span>
+        <span>Income <span className="font-semibold text-emerald-600 dark:text-emerald-400">{fmtMoney(filteredTotals.income)}</span></span>
+        <span>Expenses <span className="font-semibold text-destructive">{fmtMoney(filteredTotals.expenses)}</span></span>
+        <span>Net <span className={`font-semibold ${filteredTotals.net >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-destructive'}`}>{fmtMoney(filteredTotals.net)}</span></span>
+      </div>
+
+      {selected.size > 0 && (
+        <div className="mb-4 flex items-center gap-2.5 rounded-lg border border-destructive/40 bg-destructive/5 px-3.5 py-2.5">
+          <span className="text-sm font-medium">{selected.size} selected</span>
+          <Button
+            variant="destructive"
+            size="sm"
+            disabled={bulkDelete.isPending}
+            onClick={() => {
+              if (confirm(`Delete ${selected.size} selected transaction${selected.size === 1 ? '' : 's'}? This cannot be undone from the UI.`)) {
+                bulkDelete.mutate(Array.from(selected));
+              }
+            }}
+          >
+            <Trash2 className="size-4" />
+            {bulkDelete.isPending ? 'Deleting…' : 'Delete Selected'}
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())}>Clear selection</Button>
+        </div>
+      )}
+
       {showAddForm && (
         <Card className="mb-4">
           <CardContent className="flex flex-wrap items-center gap-2 pt-0">
@@ -129,6 +192,13 @@ export function Transactions() {
         <Table>
           <TableHeader>
             <TableRow>
+              <TableHead className="w-8 pl-6">
+                <Checkbox
+                  checked={allVisibleSelected}
+                  onCheckedChange={(v) => toggleAll(v === true)}
+                  aria-label="Select all visible transactions"
+                />
+              </TableHead>
               <TableHead>Date</TableHead><TableHead>Description</TableHead><TableHead>Category</TableHead>
               <TableHead>Account</TableHead><TableHead>Type</TableHead>
               <TableHead className="text-right">Amount</TableHead><TableHead>Sync</TableHead><TableHead></TableHead>
@@ -136,11 +206,18 @@ export function Transactions() {
           </TableHeader>
           <TableBody>
             {!transactions.data?.length ? (
-              <TableRow><TableCell colSpan={8}>
+              <TableRow><TableCell colSpan={9}>
                 <div className="py-8 text-center text-sm text-muted-foreground">No transactions match these filters.</div>
               </TableCell></TableRow>
             ) : transactions.data.map((t) => (
-              <TableRow key={t.transaction_id}>
+              <TableRow key={t.transaction_id} data-state={selected.has(t.transaction_id) ? 'selected' : undefined}>
+                <TableCell className="pl-6">
+                  <Checkbox
+                    checked={selected.has(t.transaction_id)}
+                    onCheckedChange={(v) => toggleRow(t.transaction_id, v === true)}
+                    aria-label={`Select ${t.description}`}
+                  />
+                </TableCell>
                 <TableCell className="whitespace-nowrap">{t.date}</TableCell>
                 <TableCell className="max-w-[380px] whitespace-normal break-words">{t.description}</TableCell>
                 <TableCell>{t.category}</TableCell>

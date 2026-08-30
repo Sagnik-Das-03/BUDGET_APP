@@ -96,6 +96,10 @@ class SheetRowValidationError(BaseModel):
     reason: str
 
 
+class BulkDeleteIn(BaseModel):
+    transaction_ids: list[str] = Field(min_length=1)
+
+
 class ImportRowOut(BaseModel):
     row_key: str
     date: date_type

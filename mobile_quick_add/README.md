@@ -9,12 +9,14 @@ next sync it assigns a real ID, fills in the Month column, and pulls it into
 your local database, exactly like editing the sheet by hand would. Nothing in
 the backend or frontend needed to change for this to work.
 
-It's still add-only, not a mobile dashboard — no charts, no editing existing
-transactions. What it does show, read straight off the sheet on page load and
-refreshed after every add: this calendar month's Income/Expenses/Net, and the
-8 most recent transactions (deleted rows excluded from both). Enough to
-sanity-check "did that last entry actually go through" without opening the
-full app.
+Still not a mobile dashboard — no charts, no deleting. What it does show, read
+straight off the sheet on page load and refreshed after every add/edit: this
+calendar month's Income/Expenses/Net, and the 8 most recent transactions
+(deleted rows excluded from both). Each recent transaction has an **Edit**
+link that pre-fills the form from that row (by its sheet row number) and
+switches the button to "Save Changes" — editing intentionally leaves the
+Transaction ID cell untouched, so the app's sync engine treats it as an
+update to the existing transaction rather than a new one.
 
 ## Deploy it (one-time, ~5 minutes)
 
