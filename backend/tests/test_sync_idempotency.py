@@ -69,3 +69,45 @@ def test_push_does_not_duplicate_when_retried_after_partial_failure(session, she
     assert len(matching) == 1, "transaction must appear exactly once in the sheet, not duplicated"
     assert tx_repo.get_by_transaction_id(txn.transaction_id).sync_status == SyncStatus.synced
     assert push_result["appended"] == 0
+
+
+def test_deleting_an_already_synced_transaction_pushes_the_deletion(session, sheets):
+    """Regression test: list_pending_sync() used to filter out deleted_at rows,
+    which meant a deletion never reached Sheets no matter how many sync cycles
+    ran - it stayed local-only forever. Deleting a transaction, then syncing,
+    must flip its row's Deleted column to TRUE in the sheet."""
+    cat_repo, acct_repo, tx_repo = CategoryRepository(session), AccountRepository(session), TransactionRepository(session)
+    category, account = cat_repo.get_by_name("Shopping"), acct_repo.get_or_create("Primary")
+
+    txn = tx_repo.create(date=date(2026, 9, 10), description="Subscription", amount=199.0,
+                          transaction_type=TransactionType.expense, category=category, account=account)
+    session.commit()
+
+    sheets.ensure_sheet(SPREADSHEET_ID, "Transactions")
+    sheets.clear_and_write(SPREADSHEET_ID, "Transactions", [mapping.HEADERS])
+
+    # first sync cycle: pushes the new transaction, gets it onto the sheet as synced
+    raw_rows = sheets.get_rows(SPREADSHEET_ID, "Transactions")
+    pull_result = pull(session, sheets, SPREADSHEET_ID, raw_rows)
+    session.commit()
+    push(session, sheets, SPREADSHEET_ID, pull_result["id_to_row_number"])
+    session.commit()
+    assert tx_repo.get_by_transaction_id(txn.transaction_id).sync_status == SyncStatus.synced
+
+    # user deletes it in the app
+    tx_repo.soft_delete(txn.transaction_id)
+    session.commit()
+    assert tx_repo.get_by_transaction_id(txn.transaction_id).sync_status == SyncStatus.pending
+
+    # next sync cycle: the deletion must reach the sheet
+    raw_rows = sheets.get_rows(SPREADSHEET_ID, "Transactions")
+    pull_result = pull(session, sheets, SPREADSHEET_ID, raw_rows)
+    session.commit()
+    push_result = push(session, sheets, SPREADSHEET_ID, pull_result["id_to_row_number"])
+    session.commit()
+
+    assert push_result["updated"] == 1
+    data_rows = sheets.get_rows(SPREADSHEET_ID, "Transactions")[1:]
+    row = next(r for r in data_rows if r and r[0] == txn.transaction_id)
+    assert row[mapping.COL["Deleted"]] == "TRUE"
+    assert tx_repo.get_by_transaction_id(txn.transaction_id).sync_status == SyncStatus.synced

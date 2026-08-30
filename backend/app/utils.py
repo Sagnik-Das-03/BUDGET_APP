@@ -13,9 +13,14 @@ TXN_ID_RE = re.compile(r"^TXN-(\d{4})-(\d{6})$")
 
 
 def content_hash(*, date: date_type, description: str, amount: float, transaction_type: str,
-                  category_name: str, account_name: str, notes: Optional[str]) -> str:
+                  category_name: str, account_name: str, notes: Optional[str], deleted: bool = False) -> str:
     """Hash of the fields that are mirrored into the sheet - used to detect real changes
-    on either side without caring about internal-only fields (row_hint, timestamps, etc.)."""
+    on either side without caring about internal-only fields (row_hint, timestamps, etc.).
+    Includes `deleted` so a delete-only change (nothing else about the transaction differs)
+    still causes content_hash to diverge from last_synced_hash - without it, the sync
+    engine's "did the app side actually change" check couldn't see a plain deletion, and a
+    pull() landing before the deletion was pushed would silently revert it (deleted_at
+    reset to None) because the sheet's stale "not deleted" state looked unchanged."""
     parts = [
         date.isoformat(),
         (description or "").strip(),
@@ -24,6 +29,7 @@ def content_hash(*, date: date_type, description: str, amount: float, transactio
         category_name,
         account_name,
         (notes or "").strip(),
+        "DELETED" if deleted else "",
     ]
     payload = "|".join(parts).encode("utf-8")
     return hashlib.sha256(payload).hexdigest()

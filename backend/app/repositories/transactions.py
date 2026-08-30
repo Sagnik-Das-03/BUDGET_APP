@@ -22,10 +22,12 @@ class TransactionRepository:
         return list(self.session.scalars(select(Transaction.transaction_id)))
 
     def list_pending_sync(self) -> list[Transaction]:
-        stmt = select(Transaction).where(
-            Transaction.sync_status.in_([SyncStatus.pending, SyncStatus.error]),
-            Transaction.deleted_at.is_(None),
-        )
+        """Deliberately does NOT filter out deleted_at rows - a soft-deleted
+        transaction still needs its deletion pushed to Sheets (mapping.to_row
+        already encodes deleted_at as the Deleted column). Excluding them here
+        was a bug: it meant no deletion ever reached Sheets, regardless of the
+        sync interval - deletes stayed local-only forever."""
+        stmt = select(Transaction).where(Transaction.sync_status.in_([SyncStatus.pending, SyncStatus.error]))
         return list(self.session.scalars(stmt))
 
     def list_conflicts(self) -> list[Transaction]:
@@ -159,6 +161,7 @@ class TransactionRepository:
             date=txn.date, description=txn.description, amount=txn.amount,
             transaction_type=txn.transaction_type.value if isinstance(txn.transaction_type, TransactionType) else txn.transaction_type,
             category_name=txn.category.name, account_name=txn.account.name, notes=txn.notes,
+            deleted=txn.deleted_at is not None,
         )
         if txn.sync_status != SyncStatus.conflict:
             txn.sync_status = SyncStatus.pending
@@ -171,6 +174,16 @@ class TransactionRepository:
             return None
         txn.deleted_at = utcnow()
         txn.sync_status = SyncStatus.pending
+        # Recompute content_hash including the new deleted state - without this,
+        # a pull() that runs before this deletion gets pushed would see an
+        # unchanged content_hash, conclude "the app side didn't really change",
+        # and revert deleted_at back to None from the sheet's still-stale row.
+        txn.content_hash = content_hash(
+            date=txn.date, description=txn.description, amount=txn.amount,
+            transaction_type=txn.transaction_type.value if isinstance(txn.transaction_type, TransactionType) else txn.transaction_type,
+            category_name=txn.category.name, account_name=txn.account.name, notes=txn.notes,
+            deleted=True,
+        )
         self.session.flush()
         return txn
 
@@ -231,7 +244,7 @@ class TransactionRepository:
         action is one of: created, updated, conflict, unchanged."""
         sheet_hash = content_hash(
             date=date, description=description, amount=amount, transaction_type=transaction_type,
-            category_name=category.name, account_name=account.name, notes=notes,
+            category_name=category.name, account_name=account.name, notes=notes, deleted=deleted,
         )
         now = utcnow()
         existing = self.get_by_transaction_id(transaction_id)
@@ -261,10 +274,14 @@ class TransactionRepository:
 
         existing.row_hint = row_hint
         app_changed = existing.content_hash != (existing.last_synced_hash or "")
+        # deleted is folded into both hashes (see content_hash's docstring), so this
+        # comparison alone already covers a deleted-only change on either side - no
+        # separate "did deleted change" flag needed, and comparing the sheet against
+        # the app's CURRENT deleted flag (rather than its last-synced one) would wrongly
+        # flag a not-yet-pushed local delete as a sheet-side change on every pull.
         sheet_changed = sheet_hash != (existing.last_synced_hash or "")
-        sheet_deleted_changed = deleted != (existing.deleted_at is not None)
 
-        if not sheet_changed and not sheet_deleted_changed:
+        if not sheet_changed:
             self.session.flush()
             return existing, "unchanged"
 
@@ -286,8 +303,8 @@ class TransactionRepository:
             return existing, "updated"
 
         # both sides changed since last sync
-        if sheet_hash == existing.content_hash and deleted == (existing.deleted_at is not None):
-            # converged on the same value independently - not a real conflict
+        if sheet_hash == existing.content_hash:
+            # converged on the same value independently (deleted included) - not a real conflict
             existing.last_synced_hash = sheet_hash
             existing.last_synced_at = now
             existing.sync_status = SyncStatus.synced
@@ -346,7 +363,7 @@ class TransactionRepository:
             txn.content_hash = content_hash(
                 date=txn.date, description=txn.description, amount=txn.amount,
                 transaction_type=txn.transaction_type, category_name=snap["category"],
-                account_name=snap["account"], notes=txn.notes,
+                account_name=snap["account"], notes=txn.notes, deleted=txn.deleted_at is not None,
             )
         # "keep app": content_hash already reflects the app's current values - just clear the flag
         txn.conflict_sheet_snapshot = None
