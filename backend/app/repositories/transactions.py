@@ -80,6 +80,15 @@ class TransactionRepository:
     def all_active(self) -> list[Transaction]:
         return self.filter()
 
+    def recent_descriptions(self, limit: int = 300) -> list[str]:
+        stmt = (
+            select(Transaction.description)
+            .where(Transaction.deleted_at.is_(None))
+            .order_by(Transaction.date.desc(), Transaction.id.desc())
+            .limit(limit)
+        )
+        return list(self.session.scalars(stmt))
+
     def find_duplicates(self, *, date: date_type, amount: float, transaction_type: str) -> list[Transaction]:
         """Same date + type + amount (to the paisa) as an existing active transaction -
         used by CSV import to flag likely-already-entered rows before they're committed."""
@@ -400,10 +409,33 @@ class TransactionRepository:
             self.session.flush()
 
     def resolve_conflict(self, transaction_id: str, keep: str) -> Optional[Transaction]:
-        """keep = 'app' or 'sheets'."""
+        """keep = 'app', 'sheets', or 'both'. 'both' leaves this transaction
+        holding the app's value (same as 'app') and additionally creates a new
+        transaction from the sheet-side snapshot, so neither edit is lost -
+        unless the sheet side was itself a deletion, in which case there's no
+        alternate value to keep and this behaves exactly like 'app'."""
         txn = self.get_by_transaction_id(transaction_id)
         if not txn or txn.sync_status != SyncStatus.conflict:
             return txn
+        if keep == "both" and txn.conflict_sheet_snapshot:
+            # Local import - avoids a module-level cycle with the category/account
+            # repositories, which don't otherwise need to know about transactions.
+            from app.repositories.accounts import AccountRepository
+            from app.repositories.categories import CategoryRepository
+
+            snap = json.loads(txn.conflict_sheet_snapshot)
+            if not snap.get("deleted"):
+                category = CategoryRepository(self.session).get_or_create(snap["category"])
+                account = AccountRepository(self.session).get_or_create(snap["account"])
+                self.create(
+                    date=date_type.fromisoformat(snap["date"]),
+                    description=snap["description"],
+                    amount=snap["amount"],
+                    transaction_type=TransactionType(snap["transaction_type"]),
+                    category=category,
+                    account=account,
+                    notes=snap["notes"],
+                )
         if keep == "sheets" and txn.conflict_sheet_snapshot:
             snap = json.loads(txn.conflict_sheet_snapshot)
             cat = self.session.scalar(select(Category).where(Category.name == snap["category"]))

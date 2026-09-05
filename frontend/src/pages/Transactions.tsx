@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Plus, Trash2, X } from 'lucide-react';
 import { api } from '../lib/api';
 import { fmtMoney } from '../lib/format';
@@ -30,6 +30,7 @@ interface NewRow {
   transaction_type: string;
   category: string;
   account: string;
+  suggestion?: string;
 }
 function emptyRow(): NewRow {
   return {
@@ -108,6 +109,27 @@ export function Transactions() {
   }
   function removeRow(id: number) {
     setNewRows((rows) => (rows.length > 1 ? rows.filter((r) => r.id !== id) : rows));
+  }
+
+  const suggestTimers = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
+
+  function onDescriptionChange(rowId: number, value: string) {
+    updateRow(rowId, { description: value, suggestion: undefined });
+    const existing = suggestTimers.current.get(rowId);
+    if (existing) clearTimeout(existing);
+    if (value.trim().length < 2) return;
+    suggestTimers.current.set(rowId, setTimeout(async () => {
+      try {
+        const { suggestion } = await api.autocomplete(value);
+        if (suggestion) updateRow(rowId, { suggestion });
+      } catch {
+        // Local AI features are optional - fail silently if unavailable.
+      }
+    }, 400));
+  }
+
+  function acceptSuggestion(rowId: number, suggestion: string) {
+    updateRow(rowId, { description: suggestion, suggestion: undefined });
   }
 
   const bulkCreateTxn = useMutation({
@@ -227,7 +249,23 @@ export function Transactions() {
                     </TableCell>
                     <TableCell>
                       <Input type="text" placeholder="Description" value={row.description}
-                        onChange={(e) => updateRow(row.id, { description: e.target.value })} className="min-w-[160px]" />
+                        onChange={(e) => onDescriptionChange(row.id, e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Tab' && row.suggestion) {
+                            e.preventDefault();
+                            acceptSuggestion(row.id, row.suggestion);
+                          }
+                        }}
+                        className="min-w-[160px]" />
+                      {row.suggestion && (
+                        <button
+                          type="button"
+                          className="mt-1 block text-xs text-muted-foreground hover:text-foreground"
+                          onClick={() => acceptSuggestion(row.id, row.suggestion!)}
+                        >
+                          → {row.suggestion} <span className="opacity-60">(Tab)</span>
+                        </button>
+                      )}
                     </TableCell>
                     <TableCell>
                       <Input type="number" placeholder="Amount" step="0.01" value={row.amount}

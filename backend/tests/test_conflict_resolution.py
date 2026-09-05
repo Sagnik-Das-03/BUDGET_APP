@@ -89,3 +89,54 @@ def test_resolve_conflict_keep_sheets(session):
     assert resolved.sync_status == SyncStatus.pending
     assert resolved.amount == 888.0
     assert resolved.conflict_sheet_snapshot is None
+
+
+def test_resolve_conflict_keep_both(session):
+    txn, category, account = _make_synced_transaction(session)
+    tx_repo = TransactionRepository(session)
+    tx_repo.update(txn.transaction_id, amount=999.0)
+    session.commit()
+    tx_repo.upsert_from_sheet(
+        transaction_id=txn.transaction_id, date=txn.date, description=txn.description,
+        amount=888.0, transaction_type="Expense", category=category, account=account,
+        notes=None, deleted=False, row_hint=2,
+    )
+    session.commit()
+
+    before_ids = set(tx_repo.all_transaction_ids())
+    resolved = tx_repo.resolve_conflict(txn.transaction_id, "both")
+    session.commit()
+
+    # Original transaction keeps the app's value, same as "keep app".
+    assert resolved.sync_status == SyncStatus.pending
+    assert resolved.amount == 999.0
+    assert resolved.conflict_sheet_snapshot is None
+
+    # A new transaction was created carrying the sheet's value.
+    new_ids = set(tx_repo.all_transaction_ids()) - before_ids
+    assert len(new_ids) == 1
+    duplicate = tx_repo.get_by_transaction_id(new_ids.pop())
+    assert duplicate.amount == 888.0
+    assert duplicate.description == txn.description
+    assert duplicate.category_id == category.id
+    assert duplicate.account_id == account.id
+
+
+def test_resolve_conflict_keep_both_skips_duplicate_when_sheet_side_deleted(session):
+    txn, category, account = _make_synced_transaction(session)
+    tx_repo = TransactionRepository(session)
+    tx_repo.update(txn.transaction_id, amount=999.0)
+    session.commit()
+    tx_repo.upsert_from_sheet(
+        transaction_id=txn.transaction_id, date=txn.date, description=txn.description,
+        amount=txn.amount, transaction_type="Expense", category=category, account=account,
+        notes=None, deleted=True, row_hint=2,
+    )
+    session.commit()
+
+    before_ids = set(tx_repo.all_transaction_ids())
+    resolved = tx_repo.resolve_conflict(txn.transaction_id, "both")
+    session.commit()
+
+    assert resolved.amount == 999.0
+    assert set(tx_repo.all_transaction_ids()) == before_ids  # nothing duplicated

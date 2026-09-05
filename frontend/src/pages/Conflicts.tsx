@@ -9,7 +9,7 @@ export function Conflicts() {
   const conflicts = useQuery({ queryKey: ['conflicts'], queryFn: api.listConflicts });
 
   const resolve = useMutation({
-    mutationFn: ({ id, keep }: { id: string; keep: 'app' | 'sheets' }) => api.resolveConflict(id, keep),
+    mutationFn: ({ id, keep }: { id: string; keep: 'app' | 'sheets' | 'both' }) => api.resolveConflict(id, keep),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['conflicts'] }),
   });
 
@@ -46,6 +46,7 @@ export function Conflicts() {
                 <div className="mt-3.5 flex gap-2">
                   <Button size="sm" onClick={() => resolve.mutate({ id: r.transaction_id, keep: 'app' })}>Keep App</Button>
                   <Button size="sm" variant="outline" onClick={() => resolve.mutate({ id: r.transaction_id, keep: 'sheets' })}>Keep Sheets</Button>
+                  <Button size="sm" variant="outline" onClick={() => resolve.mutate({ id: r.transaction_id, keep: 'both' })}>Keep Both</Button>
                 </div>
               </CardContent>
             </Card>

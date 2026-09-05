@@ -5,9 +5,11 @@ from fastapi import Depends, FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api import accounts, appearance, budgets, categories, conflicts, dashboard, imports, savings_goal, sync, transactions
+from app.api import accounts, appearance, budgets, categories, conflicts, dashboard, imports, llm, savings_goal, sync, transactions
 from app.auth import require_auth
+from app.backup import trigger_backup
 from app.db import init_db, session_scope
+from app.llm.router import llm_router
 from app.repositories.accounts import AccountRepository
 from app.repositories.categories import CategoryRepository
 from app.sync import scheduler
@@ -30,6 +32,7 @@ app.include_router(sync.router, dependencies=_auth)
 app.include_router(conflicts.router, dependencies=_auth)
 app.include_router(imports.router, dependencies=_auth)
 app.include_router(appearance.router, dependencies=_auth)
+app.include_router(llm.router, dependencies=_auth)
 
 
 @app.on_event("startup")
@@ -39,11 +42,15 @@ def on_startup() -> None:
         CategoryRepository(session).ensure_defaults()
         AccountRepository(session).ensure_default()
     scheduler.start()
+    llm_router.warm_up()
 
 
 @app.on_event("shutdown")
 def on_shutdown() -> None:
+    scheduler.run_once()  # final sync before anything gets backed up
     scheduler.stop()
+    llm_router.shutdown()
+    trigger_backup()
 
 
 @app.get("/health")

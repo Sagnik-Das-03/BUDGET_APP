@@ -84,6 +84,14 @@ class BulkCreateIn(BaseModel):
     transactions: list[TransactionIn] = Field(min_length=1, max_length=200)
 
 
+class AutocompleteIn(BaseModel):
+    text: str = Field(min_length=1, max_length=200)
+
+
+class AutocompleteOut(BaseModel):
+    suggestion: str
+
+
 class BudgetIn(BaseModel):
     category: str
     period_key: Optional[str] = None  # None = recurring monthly default
@@ -96,7 +104,7 @@ class SavingsGoalIn(BaseModel):
 
 
 class ConflictResolution(BaseModel):
-    keep: str  # "app" | "sheets"
+    keep: str  # "app" | "sheets" | "both"
 
 
 class SheetRowValidationError(BaseModel):

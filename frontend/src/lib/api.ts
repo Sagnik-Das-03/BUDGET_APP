@@ -103,6 +103,10 @@ export const api = {
   bulkPermanentDeleteTransactions: (transaction_ids: string[]) =>
     request<{ deleted: number; blocked: number; not_found: number }>('/api/transactions/bulk_permanent_delete', { method: 'POST', body: JSON.stringify({ transaction_ids }) }),
 
+  // ---------- local AI features ----------
+  autocomplete: (text: string) =>
+    request<{ suggestion: string }>('/api/llm/autocomplete', { method: 'POST', body: JSON.stringify({ text }) }),
+
   // ---------- appearance ----------
   getPalette: () => request<ChartPalette>('/api/appearance/palette'),
   setPalette: (partial: Partial<ChartPalette>) =>
@@ -125,7 +129,7 @@ export const api = {
 
   // ---------- conflicts ----------
   listConflicts: () => request<ConflictRow[]>('/api/conflicts'),
-  resolveConflict: (id: string, keep: 'app' | 'sheets') =>
+  resolveConflict: (id: string, keep: 'app' | 'sheets' | 'both') =>
     request(`/api/conflicts/${id}/resolve`, { method: 'POST', body: JSON.stringify({ keep }) }),
 
   // ---------- sync ----------

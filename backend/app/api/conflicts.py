@@ -29,8 +29,8 @@ def list_conflicts(session: Session = Depends(get_session)):
 
 @router.post("/{transaction_id}/resolve")
 def resolve(transaction_id: str, payload: ConflictResolution, session: Session = Depends(get_session)):
-    if payload.keep not in ("app", "sheets"):
-        raise HTTPException(400, 'keep must be "app" or "sheets"')
+    if payload.keep not in ("app", "sheets", "both"):
+        raise HTTPException(400, 'keep must be "app", "sheets", or "both"')
     txn = TransactionRepository(session).resolve_conflict(transaction_id, payload.keep)
     if not txn:
         raise HTTPException(404, "Transaction not found")

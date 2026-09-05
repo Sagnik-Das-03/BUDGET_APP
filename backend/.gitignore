@@ -9,3 +9,6 @@ venv/
 data/*.db
 data/*.db-journal
 *.log
+# .litertlm model files for local AI features - large binaries, fetched/placed
+# manually (see app/llm/config.py and .env's LITE_LLM_MODELS_DIR).
+models/
