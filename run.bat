@@ -69,18 +69,17 @@ echo [5/6] Setting up backend virtual environment...
 cd backend
 
 if exist ".venv" (
-    echo Removing leftover virtual environment from a previous run...
-    rmdir /s /q ".venv" 2>nul
-)
-
-echo Creating virtual environment (Python 3.13)...
-py -3.13 -m venv .venv
-if errorlevel 1 (
-    echo.
-    echo ERROR: Failed to create the virtual environment.
-    cd ..
-    pause
-    exit /b 1
+    echo Reusing existing virtual environment from a previous run...
+) else (
+    echo Creating virtual environment (Python 3.13)...
+    py -3.13 -m venv .venv
+    if errorlevel 1 (
+        echo.
+        echo ERROR: Failed to create the virtual environment.
+        cd ..
+        pause
+        exit /b 1
+    )
 )
 
 call ".venv\Scripts\activate.bat"
@@ -96,7 +95,7 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo Installing backend dependencies (this can take a minute)...
+echo Installing backend dependencies (fast no-op if already up to date)...
 python -m pip install -r requirements.txt
 if errorlevel 1 (
     echo.
@@ -118,9 +117,8 @@ echo.
 echo [6/6] Starting Budget Tracker...
 echo   URL: http://127.0.0.1:8000
 echo   Press Ctrl+C in this window to stop the server.
-echo   (The backend virtual environment is deleted automatically on shutdown to save
-echo    disk space - frontend/node_modules and frontend/dist are kept, since npm
-echo    installs are slow - only pip/venv gets the fresh-each-launch treatment.)
+echo   (backend\.venv and frontend\node_modules are kept between runs so the
+echo    next launch is fast - you'll be asked at the end if you want them cleared.)
 echo.
 start "" http://127.0.0.1:8000
 python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
@@ -130,15 +128,23 @@ if errorlevel 1 (
 )
 
 call ".venv\Scripts\deactivate.bat" 2>nul
-echo.
-echo Cleaning up backend virtual environment...
-rmdir /s /q ".venv" 2>nul
-
 cd ..
 
 echo.
 echo ============================================
 echo  Budget Tracker has stopped.
 echo ============================================
+echo.
+choice /C YN /N /M "Clear backend\.venv and frontend\node_modules to free disk space? [Y/N]: "
+if errorlevel 2 goto :skip_clear
+echo.
+echo Removing backend\.venv...
+if exist "backend\.venv" rmdir /s /q "backend\.venv" 2>nul
+echo Removing frontend\node_modules...
+if exist "frontend\node_modules" rmdir /s /q "frontend\node_modules" 2>nul
+echo Done - next launch will reinstall both from scratch.
+
+:skip_clear
+echo.
 pause
 endlocal

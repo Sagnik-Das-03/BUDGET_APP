@@ -36,7 +36,7 @@ export interface TrashedTransaction extends Transaction {
 
 export interface MonthlyRecap {
   recap: string;
-  period_key: string;
+  range: string;
 }
 
 export interface AskResponse {

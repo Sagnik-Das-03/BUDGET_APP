@@ -2,6 +2,7 @@ import { useMutation } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Send } from 'lucide-react';
 import { api } from '../lib/api';
+import { useElapsedSeconds } from '../lib/useElapsedSeconds';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
@@ -25,6 +26,7 @@ export function Ask() {
     onSuccess: (res, q) => setHistory((h) => [...h, { question: q, answer: res.answer }]),
     onError: (err: Error, q) => setHistory((h) => [...h, { question: q, answer: `Error: ${err.message}` }]),
   });
+  const elapsed = useElapsedSeconds(ask.isPending);
 
   function submit(q: string) {
     const trimmed = q.trim();
@@ -69,7 +71,7 @@ export function Ask() {
         ))}
         {ask.isPending && (
           <div className="self-start rounded-lg bg-muted px-3.5 py-2 text-sm text-muted-foreground">
-            Thinking… this can take up to a minute the first time, while the local model loads.
+            Thinking… {elapsed}s elapsed — this can take up to a minute the first time, while the local model loads.
           </div>
         )}
       </div>

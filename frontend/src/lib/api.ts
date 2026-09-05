@@ -108,8 +108,12 @@ export const api = {
     request<{ suggestion: string }>('/api/llm/autocomplete', { method: 'POST', body: JSON.stringify({ text }) }),
   categorize: (description: string) =>
     request<{ category: string }>('/api/llm/categorize', { method: 'POST', body: JSON.stringify({ description }) }),
-  monthlyRecap: (periodKey?: string) =>
-    request<MonthlyRecap>(`/api/llm/monthly_recap${qs({ period_key: periodKey })}`),
+  recap: (range: string, dateBounds?: DateBounds, label?: string) =>
+    request<MonthlyRecap>(`/api/llm/recap${qs({ range, label, ...dateBounds })}`),
+  compareRecap: (payload: {
+    label_a: string; label_b: string; date_from_a: string; date_to_a: string;
+    date_from_b: string; date_to_b: string;
+  }) => request<{ recap: string }>('/api/llm/compare_recap', { method: 'POST', body: JSON.stringify(payload) }),
   ask: (question: string) =>
     request<AskResponse>('/api/llm/ask', { method: 'POST', body: JSON.stringify({ question }) }),
 

@@ -4,17 +4,33 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from app.api.dashboard import _resolve_range as _dashboard_resolve_range
 from app.dashboard import calculations as calc
 from app.db import get_session
 from app.llm.router import llm_router
 from app.repositories.categories import CategoryRepository
 from app.repositories.transactions import TransactionRepository
 from app.schemas import (
-    AskIn, AskOut, AutocompleteIn, AutocompleteOut, CategorizeIn, CategorizeOut, MonthlyRecapOut,
+    AskIn, AskOut, AutocompleteIn, AutocompleteOut, CategorizeIn, CategorizeOut,
+    CompareRecapIn, CompareRecapOut, RecapOut,
 )
-from app.utils import period_key_for
 
 router = APIRouter(prefix="/api/llm", tags=["llm"])
+
+_RANGE_LABELS = {
+    "this_week": "this week", "this_month": "this month", "last_month": "last month",
+    "this_year": "this year", "all_time": "all time",
+}
+
+
+def _resolve_named_range(range_key: str, date_from: Optional[date_type] = None,
+                          date_to: Optional[date_type] = None) -> tuple[Optional[date_type], Optional[date_type]]:
+    """this_week/this_month/this_year/all_time/custom go through the dashboard's
+    own resolver (single source of truth for what those mean); last_month is
+    an addition dashboard doesn't need but chat/recap questions often do."""
+    if range_key == "last_month":
+        return calc._range_previous_month(calc.range_this_month()[0])
+    return _dashboard_resolve_range(range_key, date_from, date_to)
 
 
 @router.get("/status")
@@ -101,62 +117,86 @@ def categorize(payload: CategorizeIn, session: Session = Depends(get_session)):
     return CategorizeOut(category=category if category in categories else "")
 
 
-@router.get("/monthly_recap", response_model=MonthlyRecapOut)
-def monthly_recap(period_key: Optional[str] = None, session: Session = Depends(get_session)):
+@router.get("/recap", response_model=RecapOut)
+def recap(range: str = "this_month", date_from: Optional[date_type] = None, date_to: Optional[date_type] = None,
+          label: Optional[str] = None, session: Session = Depends(get_session)):
+    """Recap for whichever range/period the caller is currently looking at -
+    range is one of _RANGE_LABELS' keys, or "custom" with date_from/date_to
+    (e.g. a drilled-into month on the Dashboard). `label` is an optional
+    human-readable description of a custom range for the prompt (falls back
+    to the raw dates)."""
     if not llm_router.available:
         raise HTTPException(503, "AI features are not available")
 
-    if period_key:
-        d_from, d_to = calc.period_start(period_key), calc.period_end(period_key)
-    else:
-        d_from, d_to = calc.range_this_month()
-        period_key = period_key_for(date_type.today())
-
+    d_from, d_to = _resolve_named_range(range, date_from, date_to)
     totals = calc.totals(session, d_from, d_to)
     top_categories = calc.by_category(session, d_from, d_to, transaction_type="Expense")[:8]
 
     if not top_categories and not totals["income"]:
-        return MonthlyRecapOut(recap="Not enough data yet to generate a recap for this period.", period_key=period_key)
+        return RecapOut(recap="Not enough data yet to generate a recap for this period.", range=range)
 
+    period_desc = label or _RANGE_LABELS.get(range) or (f"{d_from} to {d_to}" if d_from and d_to else "all time")
     category_lines = "\n".join(f"- {c['category']}: Rs {c['total']:,.0f}" for c in top_categories) or "- (none)"
     prompt = (
+        f"Period: {period_desc}\n"
         f"Income: Rs {totals['income']:,.0f}\n"
         f"Expenses: Rs {totals['expenses']:,.0f}\n"
         f"Net savings: Rs {totals['net']:,.0f}\n"
         f"Savings rate: {totals['savings_rate'] * 100:.1f}%\n"
         f"Top expense categories:\n{category_lines}\n\n"
-        "Write a short, friendly 3-4 sentence recap of this month's finances for the user. "
+        "Write a short, friendly 3-4 sentence recap of this period's finances for the user. "
         "Mention anything notable (a dominant category, a good or concerning savings rate). "
         "Be specific with the numbers given above - do not invent new ones."
     )
     try:
-        recap = llm_router.complete(
+        recap_text = llm_router.complete(
             "summarize", prompt,
-            system_message="You are a friendly personal-finance assistant writing a short monthly recap.",
+            system_message="You are a friendly personal-finance assistant writing a short spending recap.",
             max_output_tokens=220,
         )
     except Exception as e:
         raise HTTPException(503, f"Failed to generate recap: {e}") from e
 
-    return MonthlyRecapOut(recap=recap or "Not enough data yet to generate a recap for this period.", period_key=period_key)
+    return RecapOut(recap=recap_text or "Not enough data yet to generate a recap for this period.", range=range)
 
 
-_RANGE_LABELS = {
-    "this_week": "this week", "this_month": "this month", "last_month": "last month",
-    "this_year": "this year", "all_time": "all time",
-}
+@router.post("/compare_recap", response_model=CompareRecapOut)
+def compare_recap(payload: CompareRecapIn, session: Session = Depends(get_session)):
+    if not llm_router.available:
+        raise HTTPException(503, "AI features are not available")
 
+    totals_a = calc.totals(session, payload.date_from_a, payload.date_to_a)
+    totals_b = calc.totals(session, payload.date_from_b, payload.date_to_b)
+    cats_a = {c["category"]: c["total"] for c in calc.by_category(
+        session, payload.date_from_a, payload.date_to_a, transaction_type="Expense")}
+    cats_b = {c["category"]: c["total"] for c in calc.by_category(
+        session, payload.date_from_b, payload.date_to_b, transaction_type="Expense")}
+    names = sorted(set(cats_a) | set(cats_b), key=lambda n: -(cats_a.get(n, 0) + cats_b.get(n, 0)))[:8]
+    category_lines = "\n".join(
+        f"- {n}: {payload.label_a}=Rs {cats_a.get(n, 0):,.0f}, {payload.label_b}=Rs {cats_b.get(n, 0):,.0f}"
+        for n in names
+    ) or "- (no expense categories in either period)"
 
-def _resolve_ask_range(range_key: str) -> tuple[Optional[date_type], Optional[date_type]]:
-    if range_key == "last_month":
-        return calc._range_previous_month(calc.range_this_month()[0])
-    if range_key == "this_week":
-        return calc.range_this_week()
-    if range_key == "this_year":
-        return calc.range_this_year()
-    if range_key == "all_time":
-        return None, None
-    return calc.range_this_month()
+    prompt = (
+        f"{payload.label_a}: Income Rs {totals_a['income']:,.0f}, Expenses Rs {totals_a['expenses']:,.0f}, "
+        f"Net Rs {totals_a['net']:,.0f}, Savings rate {totals_a['savings_rate'] * 100:.1f}%\n"
+        f"{payload.label_b}: Income Rs {totals_b['income']:,.0f}, Expenses Rs {totals_b['expenses']:,.0f}, "
+        f"Net Rs {totals_b['net']:,.0f}, Savings rate {totals_b['savings_rate'] * 100:.1f}%\n"
+        f"Category breakdown:\n{category_lines}\n\n"
+        f"Write a short, friendly 3-4 sentence comparison of {payload.label_a} vs {payload.label_b}. "
+        "Call out the most notable changes (biggest category swing, income or savings-rate change). "
+        "Be specific with the numbers given above - do not invent new ones."
+    )
+    try:
+        recap_text = llm_router.complete(
+            "summarize", prompt,
+            system_message="You are a friendly personal-finance assistant comparing two time periods.",
+            max_output_tokens=220,
+        )
+    except Exception as e:
+        raise HTTPException(503, f"Failed to generate comparison: {e}") from e
+
+    return CompareRecapOut(recap=recap_text or "Not enough data to compare these periods.")
 
 
 @router.post("/ask", response_model=AskOut)
@@ -207,7 +247,7 @@ def ask(payload: AskIn, session: Session = Depends(get_session)):
     range_key = parsed.get("range") if parsed.get("range") in _RANGE_LABELS else "this_month"
     aggregation = parsed.get("aggregation") if parsed.get("aggregation") in ("sum", "count", "avg") else "sum"
 
-    date_from, date_to = _resolve_ask_range(range_key)
+    date_from, date_to = _resolve_named_range(range_key)
     category_ids = None
     if category:
         cat = CategoryRepository(session).get_by_name(category)

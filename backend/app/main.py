@@ -7,7 +7,6 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api import accounts, appearance, budgets, categories, conflicts, dashboard, imports, llm, savings_goal, sync, transactions
 from app.auth import require_auth
-from app.backup import trigger_backup
 from app.db import init_db, session_scope
 from app.llm.router import llm_router
 from app.repositories.accounts import AccountRepository
@@ -47,10 +46,9 @@ def on_startup() -> None:
 
 @app.on_event("shutdown")
 def on_shutdown() -> None:
-    scheduler.run_once()  # final sync before anything gets backed up
+    scheduler.run_once()  # final sync before shutting down
     scheduler.stop()
     llm_router.shutdown()
-    trigger_backup()
 
 
 @app.get("/health")

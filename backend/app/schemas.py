@@ -100,9 +100,22 @@ class CategorizeOut(BaseModel):
     category: str
 
 
-class MonthlyRecapOut(BaseModel):
+class RecapOut(BaseModel):
     recap: str
-    period_key: str
+    range: str
+
+
+class CompareRecapIn(BaseModel):
+    label_a: str = Field(min_length=1, max_length=60)
+    label_b: str = Field(min_length=1, max_length=60)
+    date_from_a: date_type
+    date_to_a: date_type
+    date_from_b: date_type
+    date_to_b: date_type
+
+
+class CompareRecapOut(BaseModel):
+    recap: str
 
 
 class AskIn(BaseModel):

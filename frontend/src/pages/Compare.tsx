@@ -7,6 +7,7 @@ import { api } from '../lib/api';
 import { fmtMoney, fmtPct } from '../lib/format';
 import { shiftMonthValue, thisMonthValue } from '../lib/dates';
 import { PeriodPicker, resolvePeriod, type PeriodValue } from '../components/PeriodPicker';
+import { CompareRecapCard } from '../components/CompareRecapCard';
 import { usePalette } from '../lib/usePalette';
 import { useIsDark } from '@/lib/useIsDark';
 import { chartTheme } from '@/lib/chartTheme';
@@ -307,6 +308,13 @@ export function Compare() {
               </TableBody>
             </Table>
           </Card>
+
+          <CompareRecapCard
+            key={`${resolvedA.date_from}_${resolvedA.date_to}_${resolvedB.date_from}_${resolvedB.date_to}`}
+            labelA={resolvedA.label} labelB={resolvedB.label}
+            dateFromA={resolvedA.date_from} dateToA={resolvedA.date_to}
+            dateFromB={resolvedB.date_from} dateToB={resolvedB.date_to}
+          />
         </>
       )}
     </>
