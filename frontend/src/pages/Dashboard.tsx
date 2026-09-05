@@ -11,6 +11,7 @@ import { KpiRow, type KpiTileData } from '../components/KpiRow';
 import { TrendChart } from '../components/TrendChart';
 import { CategoryChart } from '../components/CategoryChart';
 import { BudgetChart } from '../components/BudgetChart';
+import { MonthlyRecapCard } from '../components/MonthlyRecapCard';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 const RANGE_LABEL: Record<RangeKey, string> = {
@@ -193,6 +194,10 @@ export function Dashboard() {
       <AlertBanner alerts={alerts.data} />
       <MetricsRow highlights={highlights.data} />
       <KpiRow tiles={tiles} />
+
+      <div className="mb-5">
+        <MonthlyRecapCard />
+      </div>
 
       <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
         <TrendChart data={trend.data} />

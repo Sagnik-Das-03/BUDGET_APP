@@ -1,9 +1,10 @@
+import json
 import logging
 import re
 import threading
-from typing import Optional
+from typing import Any, Optional
 
-from app.llm.config import TASK_MODEL, model_path
+from app.llm.config import EAGER_TASKS, TASK_MODEL, model_path
 
 logger = logging.getLogger("budget_tracker.llm")
 
@@ -50,15 +51,18 @@ class LLMRouter:
         if not self.available:
             logger.warning("LLM features disabled: %s", self.unavailable_reason)
             return
-        for task, model_key in TASK_MODEL.items():
+        for task in EAGER_TASKS:
+            model_key = TASK_MODEL.get(task)
+            if not model_key:
+                continue
             try:
                 self._engine_for_model(model_key)
             except Exception:
                 logger.exception("Failed to load model %r for task %r", model_key, task)
 
-    def complete(
-        self, task: str, prompt: str, *, system_message: Optional[str] = None, max_output_tokens: int = 64,
-        enable_thinking: bool = False,
+    def _raw_complete(
+        self, task: str, prompt: str, *, system_message: Optional[str], max_output_tokens: int,
+        enable_thinking: bool, response_format=None,
     ) -> str:
         if not self.available:
             raise RuntimeError(f"LLM features unavailable: {self.unavailable_reason}")
@@ -76,6 +80,12 @@ class LLMRouter:
             # callers don't need to know this is model-specific.
             system_message = f"{system_message}\n/no_think" if system_message else "/no_think"
 
+        constrained_decoding_config = None
+        if response_format is not None:
+            constrained_decoding_config = litert_lm.ConstrainedDecodingConfig(
+                enable=True, provider=litert_lm.LiteRtLmConstraintProviderType.LL_GUIDANCE,
+            )
+
         # Serialize calls per-process - keeps this simple and safe for a
         # single-user local app rather than relying on the native lib's
         # internal concurrency guarantees across conversations.
@@ -84,9 +94,10 @@ class LLMRouter:
                 system_message=system_message,
                 max_output_tokens=max_output_tokens,
                 thinking_config=litert_lm.ThinkingConfig(enable_thinking=enable_thinking),
+                constrained_decoding_config=constrained_decoding_config,
             )
             try:
-                response = conversation.send_message(prompt)
+                response = conversation.send_message(prompt, response_format=response_format)
             finally:
                 conversation.close()
 
@@ -95,6 +106,29 @@ class LLMRouter:
                 text = block.get("text") or ""
                 return _THINK_BLOCK.sub("", text).strip()
         return ""
+
+    def complete(
+        self, task: str, prompt: str, *, system_message: Optional[str] = None, max_output_tokens: int = 64,
+        enable_thinking: bool = False,
+    ) -> str:
+        return self._raw_complete(
+            task, prompt, system_message=system_message, max_output_tokens=max_output_tokens,
+            enable_thinking=enable_thinking,
+        )
+
+    def complete_json(
+        self, task: str, prompt: str, *, schema: dict[str, Any], system_message: Optional[str] = None,
+        max_output_tokens: int = 150,
+    ) -> dict[str, Any]:
+        """Like complete(), but constrains decoding to JSON matching `schema`
+        (JSON Schema dict) via the model's grammar-guided decoding - reliable
+        structured output from a small model, instead of hoping it produces
+        parseable JSON on its own."""
+        text = self._raw_complete(
+            task, prompt, system_message=system_message, max_output_tokens=max_output_tokens,
+            enable_thinking=False, response_format=litert_lm.ResponseFormat.json(schema),
+        )
+        return json.loads(text)
 
     def shutdown(self) -> None:
         for engine in self._engines.values():

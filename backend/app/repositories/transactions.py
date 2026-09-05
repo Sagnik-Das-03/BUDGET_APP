@@ -89,6 +89,19 @@ class TransactionRepository:
         )
         return list(self.session.scalars(stmt))
 
+    def category_for_description(self, description: str) -> Optional[str]:
+        """The category of the most recent active transaction with this exact
+        (case-insensitive) description - a real prior categorization beats any
+        model guess, so callers should try this before falling back to the LLM."""
+        stmt = (
+            select(Category.name)
+            .join(Transaction, Transaction.category_id == Category.id)
+            .where(Transaction.deleted_at.is_(None), Transaction.description.ilike(description))
+            .order_by(Transaction.date.desc(), Transaction.id.desc())
+            .limit(1)
+        )
+        return self.session.scalar(stmt)
+
     def find_duplicates(self, *, date: date_type, amount: float, transaction_type: str) -> list[Transaction]:
         """Same date + type + amount (to the paisa) as an existing active transaction -
         used by CSV import to flag likely-already-entered rows before they're committed."""

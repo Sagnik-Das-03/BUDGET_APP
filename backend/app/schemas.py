@@ -92,6 +92,32 @@ class AutocompleteOut(BaseModel):
     suggestion: str
 
 
+class CategorizeIn(BaseModel):
+    description: str = Field(min_length=1, max_length=255)
+
+
+class CategorizeOut(BaseModel):
+    category: str
+
+
+class MonthlyRecapOut(BaseModel):
+    recap: str
+    period_key: str
+
+
+class AskIn(BaseModel):
+    question: str = Field(min_length=1, max_length=300)
+
+
+class AskOut(BaseModel):
+    answer: str
+    amount: Optional[float] = None
+    count: Optional[int] = None
+    category: Optional[str] = None
+    transaction_type: Optional[str] = None
+    range: str
+
+
 class BudgetIn(BaseModel):
     category: str
     period_key: Optional[str] = None  # None = recurring monthly default

@@ -34,6 +34,20 @@ export interface TrashedTransaction extends Transaction {
   can_permanently_delete: boolean;
 }
 
+export interface MonthlyRecap {
+  recap: string;
+  period_key: string;
+}
+
+export interface AskResponse {
+  answer: string;
+  amount: number | null;
+  count: number | null;
+  category: string | null;
+  transaction_type: string | null;
+  range: string;
+}
+
 export interface Totals {
   income: number;
   expenses: number;

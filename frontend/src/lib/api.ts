@@ -1,7 +1,7 @@
 import type {
-  Account, Budget, BudgetAlert, BudgetVsActual, Category, CategoryDrilldownNode,
+  Account, AskResponse, Budget, BudgetAlert, BudgetVsActual, Category, CategoryDrilldownNode,
   CategoryTotal, ChartPalette, ConflictRow, Highlights, ImportCommitResult, ImportPreviewResult, ImportRowIn,
-  MonthlyBreakdownRow, SavingsGoalProgress, SyncConfig, SyncLogEntry,
+  MonthlyBreakdownRow, MonthlyRecap, SavingsGoalProgress, SyncConfig, SyncLogEntry,
   SyncStatus, Totals, Transaction, TrashedTransaction, TrendForRange,
 } from './types';
 
@@ -106,6 +106,12 @@ export const api = {
   // ---------- local AI features ----------
   autocomplete: (text: string) =>
     request<{ suggestion: string }>('/api/llm/autocomplete', { method: 'POST', body: JSON.stringify({ text }) }),
+  categorize: (description: string) =>
+    request<{ category: string }>('/api/llm/categorize', { method: 'POST', body: JSON.stringify({ description }) }),
+  monthlyRecap: (periodKey?: string) =>
+    request<MonthlyRecap>(`/api/llm/monthly_recap${qs({ period_key: periodKey })}`),
+  ask: (question: string) =>
+    request<AskResponse>('/api/llm/ask', { method: 'POST', body: JSON.stringify({ question }) }),
 
   // ---------- appearance ----------
   getPalette: () => request<ChartPalette>('/api/appearance/palette'),

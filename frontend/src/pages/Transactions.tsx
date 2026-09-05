@@ -31,6 +31,7 @@ interface NewRow {
   category: string;
   account: string;
   suggestion?: string;
+  categoryTouched?: boolean;
 }
 function emptyRow(): NewRow {
   return {
@@ -120,8 +121,17 @@ export function Transactions() {
     if (value.trim().length < 2) return;
     suggestTimers.current.set(rowId, setTimeout(async () => {
       try {
-        const { suggestion } = await api.autocomplete(value);
+        const [{ suggestion }, { category: suggestedCategory }] = await Promise.all([
+          api.autocomplete(value),
+          api.categorize(value),
+        ]);
         if (suggestion) updateRow(rowId, { suggestion });
+        // Never override a category the user picked themselves.
+        setNewRows((rows) => rows.map((r) => (
+          r.id === rowId && !r.categoryTouched && !r.category && suggestedCategory
+            ? { ...r, category: suggestedCategory }
+            : r
+        )));
       } catch {
         // Local AI features are optional - fail silently if unavailable.
       }
@@ -281,7 +291,7 @@ export function Transactions() {
                       </Select>
                     </TableCell>
                     <TableCell>
-                      <Select value={row.category || ANY} onValueChange={(v) => updateRow(row.id, { category: v === ANY ? '' : v })}>
+                      <Select value={row.category || ANY} onValueChange={(v) => updateRow(row.id, { category: v === ANY ? '' : v, categoryTouched: true })}>
                         <SelectTrigger size="sm" className="w-[150px]"><SelectValue placeholder="Category…" /></SelectTrigger>
                         <SelectContent>
                           <SelectItem value={ANY}>Category…</SelectItem>

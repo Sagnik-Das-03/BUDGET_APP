@@ -41,9 +41,9 @@ export function SyncStatusWidget() {
   }
 
   return (
-    <div className={cn('flex items-center gap-1.5 text-xs font-medium whitespace-nowrap', cls)}>
+    <div className={cn('flex flex-wrap items-center gap-1.5 text-xs font-medium', cls)}>
       {icon}
-      <span className="hidden sm:inline">{label}</span>
+      <span>{label}</span>
       <Button
         variant="ghost"
         size="sm"
