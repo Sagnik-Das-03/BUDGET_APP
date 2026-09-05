@@ -2,7 +2,7 @@ import type {
   Account, Budget, BudgetAlert, BudgetVsActual, Category, CategoryDrilldownNode,
   CategoryTotal, ChartPalette, ConflictRow, Highlights, ImportCommitResult, ImportPreviewResult, ImportRowIn,
   MonthlyBreakdownRow, SavingsGoalProgress, SyncConfig, SyncLogEntry,
-  SyncStatus, Totals, Transaction, TrendForRange,
+  SyncStatus, Totals, Transaction, TrashedTransaction, TrendForRange,
 } from './types';
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -18,10 +18,18 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return ct.includes('application/json') ? res.json() : (undefined as T);
 }
 
-function qs(params: Record<string, string | number | undefined>): string {
-  const parts = Object.entries(params)
-    .filter(([, v]) => v !== undefined && v !== '')
-    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`);
+type QueryValue = string | number | boolean | string[] | undefined;
+
+function qs(params: Record<string, QueryValue>): string {
+  const parts: string[] = [];
+  for (const [k, v] of Object.entries(params)) {
+    if (v === undefined || v === '') continue;
+    if (Array.isArray(v)) {
+      for (const item of v) parts.push(`${encodeURIComponent(k)}=${encodeURIComponent(item)}`);
+    } else {
+      parts.push(`${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`);
+    }
+  }
   return parts.length ? `?${parts.join('&')}` : '';
 }
 
@@ -74,15 +82,26 @@ export const api = {
   deactivateAccount: (id: number) => request(`/api/accounts/${id}`, { method: 'DELETE' }),
 
   // ---------- transactions ----------
-  listTransactions: (filters: Record<string, string | number | undefined>) =>
+  listTransactions: (filters: Record<string, QueryValue>) =>
     request<Transaction[]>(`/api/transactions${qs(filters)}`),
   createTransaction: (payload: Record<string, unknown>) =>
     request<Transaction>('/api/transactions', { method: 'POST', body: JSON.stringify(payload) }),
+  bulkCreateTransactions: (transactions: Record<string, unknown>[]) =>
+    request<Transaction[]>('/api/transactions/bulk', { method: 'POST', body: JSON.stringify({ transactions }) }),
   deleteTransaction: (id: string) => request(`/api/transactions/${id}`, { method: 'DELETE' }),
   bulkDeleteTransactions: (transaction_ids: string[]) =>
     request<{ deleted_count: number }>('/api/transactions/bulk_delete', { method: 'POST', body: JSON.stringify({ transaction_ids }) }),
   deletePendingTransactions: () =>
     request<{ hard_deleted: number; soft_deleted: number; total: number }>('/api/transactions/pending', { method: 'DELETE' }),
+
+  // ---------- trash ----------
+  listTrash: () => request<TrashedTransaction[]>('/api/transactions/trash'),
+  restoreTransaction: (id: string) => request<Transaction>(`/api/transactions/${id}/restore`, { method: 'POST' }),
+  bulkRestoreTransactions: (transaction_ids: string[]) =>
+    request<{ restored_count: number }>('/api/transactions/bulk_restore', { method: 'POST', body: JSON.stringify({ transaction_ids }) }),
+  permanentDeleteTransaction: (id: string) => request(`/api/transactions/${id}/permanent`, { method: 'DELETE' }),
+  bulkPermanentDeleteTransactions: (transaction_ids: string[]) =>
+    request<{ deleted: number; blocked: number; not_found: number }>('/api/transactions/bulk_permanent_delete', { method: 'POST', body: JSON.stringify({ transaction_ids }) }),
 
   // ---------- appearance ----------
   getPalette: () => request<ChartPalette>('/api/appearance/palette'),

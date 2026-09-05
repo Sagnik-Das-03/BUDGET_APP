@@ -1,15 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
-import { Plus, Trash2 } from 'lucide-react';
+import { Plus, Trash2, X } from 'lucide-react';
 import { api } from '../lib/api';
 import { fmtMoney } from '../lib/format';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Card, CardContent } from '@/components/ui/card';
+import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { MultiSelectFilter } from '@/components/MultiSelectFilter';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July',
   'August', 'September', 'October', 'November', 'December'];
@@ -20,22 +21,40 @@ const SYNC_VARIANT: Record<string, 'default' | 'secondary' | 'destructive' | 'ou
 
 const ANY = '__any__';
 
+let nextRowId = 1;
+interface NewRow {
+  id: number;
+  date: string;
+  description: string;
+  amount: string;
+  transaction_type: string;
+  category: string;
+  account: string;
+}
+function emptyRow(): NewRow {
+  return {
+    id: nextRowId++, date: new Date().toISOString().slice(0, 10), description: '', amount: '',
+    transaction_type: 'Expense', category: '', account: 'Primary',
+  };
+}
+
 export function Transactions() {
   const queryClient = useQueryClient();
   const [year, setYear] = useState('');
   const [month, setMonth] = useState('');
-  const [category, setCategory] = useState('');
+  const [category, setCategory] = useState<string[]>([]);
+  const [categoryExclude, setCategoryExclude] = useState(false);
+  const [account, setAccount] = useState<string[]>([]);
+  const [accountExclude, setAccountExclude] = useState(false);
   const [type, setType] = useState('');
   const [search, setSearch] = useState('');
   const [appliedFilters, setAppliedFilters] = useState({});
   const [showAddForm, setShowAddForm] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [newTxn, setNewTxn] = useState({
-    date: new Date().toISOString().slice(0, 10), description: '', amount: '',
-    transaction_type: 'Expense', category: '', account: 'Primary',
-  });
+  const [newRows, setNewRows] = useState<NewRow[]>([emptyRow()]);
 
   const categories = useQuery({ queryKey: ['categories'], queryFn: api.listCategories });
+  const accounts = useQuery({ queryKey: ['accounts'], queryFn: api.listAccounts });
   const transactions = useQuery({
     queryKey: ['transactions', appliedFilters],
     queryFn: () => api.listTransactions(appliedFilters),
@@ -79,17 +98,35 @@ export function Transactions() {
     return { count: rows.length, income, expenses, net: income - expenses };
   }, [transactions.data]);
 
-  const createTxn = useMutation({
-    mutationFn: () => api.createTransaction({ ...newTxn, amount: parseFloat(newTxn.amount) }),
+  const validRows = newRows.filter((r) => r.description.trim() && r.category && parseFloat(r.amount) > 0);
+
+  function updateRow(id: number, patch: Partial<NewRow>) {
+    setNewRows((rows) => rows.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  }
+  function addRow() {
+    setNewRows((rows) => [...rows, emptyRow()]);
+  }
+  function removeRow(id: number) {
+    setNewRows((rows) => (rows.length > 1 ? rows.filter((r) => r.id !== id) : rows));
+  }
+
+  const bulkCreateTxn = useMutation({
+    mutationFn: () => api.bulkCreateTransactions(validRows.map((r) => ({
+      date: r.date, description: r.description, amount: parseFloat(r.amount),
+      transaction_type: r.transaction_type, category: r.category, account: r.account || 'Primary',
+    }))),
     onSuccess: () => {
       setShowAddForm(false);
+      setNewRows([emptyRow()]);
       queryClient.invalidateQueries({ queryKey: ['transactions'] });
     },
   });
 
   function applyFilters() {
     setAppliedFilters({
-      year: year || undefined, month: month || undefined, category: category || undefined,
+      year: year || undefined, month: month || undefined,
+      category: category.length ? category : undefined, category_exclude: categoryExclude,
+      account: account.length ? account : undefined, account_exclude: accountExclude,
       type: type || undefined, search: search || undefined,
     });
     setSelected(new Set());
@@ -109,13 +146,22 @@ export function Transactions() {
             {MONTHS.map((m, i) => <SelectItem key={m} value={String(i + 1)}>{m}</SelectItem>)}
           </SelectContent>
         </Select>
-        <Select value={category || ANY} onValueChange={(v) => setCategory(v === ANY ? '' : v)}>
-          <SelectTrigger size="sm" className="w-[150px]"><SelectValue placeholder="Any category" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ANY}>Any category</SelectItem>
-            {categories.data?.map((c) => <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
+        <MultiSelectFilter
+          label="Category"
+          options={categories.data?.map((c) => ({ value: c.name, label: c.name })) ?? []}
+          selected={category}
+          onSelectedChange={setCategory}
+          exclude={categoryExclude}
+          onExcludeChange={setCategoryExclude}
+        />
+        <MultiSelectFilter
+          label="Account"
+          options={accounts.data?.map((a) => ({ value: a.name, label: a.name })) ?? []}
+          selected={account}
+          onSelectedChange={setAccount}
+          exclude={accountExclude}
+          onExcludeChange={setAccountExclude}
+        />
         <Select value={type || ANY} onValueChange={(v) => setType(v === ANY ? '' : v)}>
           <SelectTrigger size="sm" className="w-[130px]"><SelectValue placeholder="Any type" /></SelectTrigger>
           <SelectContent>
@@ -127,7 +173,7 @@ export function Transactions() {
         <Input type="text" placeholder="Search description…" value={search} onChange={(e) => setSearch(e.target.value)} className="w-56" />
         <Button variant="outline" size="sm" onClick={applyFilters}>Filter</Button>
         <Button size="sm" onClick={() => setShowAddForm(!showAddForm)}>
-          <Plus className="size-4" /> Add Transaction
+          <Plus className="size-4" /> Add Transactions
         </Button>
       </div>
 
@@ -159,32 +205,78 @@ export function Transactions() {
       )}
 
       {showAddForm && (
-        <Card className="mb-4">
-          <CardContent className="flex flex-wrap items-center gap-2 pt-0">
-            <Input type="date" value={newTxn.date} onChange={(e) => setNewTxn({ ...newTxn, date: e.target.value })} className="w-40" />
-            <Input type="text" placeholder="Description" value={newTxn.description}
-              onChange={(e) => setNewTxn({ ...newTxn, description: e.target.value })} className="w-48" />
-            <Input type="number" placeholder="Amount" step="0.01" value={newTxn.amount}
-              onChange={(e) => setNewTxn({ ...newTxn, amount: e.target.value })} className="w-32" />
-            <Select value={newTxn.transaction_type} onValueChange={(v) => setNewTxn({ ...newTxn, transaction_type: v })}>
-              <SelectTrigger size="sm" className="w-[110px]"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="Expense">Expense</SelectItem>
-                <SelectItem value="Income">Income</SelectItem>
-              </SelectContent>
-            </Select>
-            <Select value={newTxn.category || ANY} onValueChange={(v) => setNewTxn({ ...newTxn, category: v === ANY ? '' : v })}>
-              <SelectTrigger size="sm" className="w-[150px]"><SelectValue placeholder="Category…" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ANY}>Category…</SelectItem>
-                {categories.data?.map((c) => <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
-            <Input type="text" placeholder="Account" value={newTxn.account}
-              onChange={(e) => setNewTxn({ ...newTxn, account: e.target.value })} className="w-32" />
-            <Button size="sm" disabled={!newTxn.description || !newTxn.amount} onClick={() => createTxn.mutate()}>Save</Button>
-            <Button size="sm" variant="outline" onClick={() => setShowAddForm(false)}>Cancel</Button>
-          </CardContent>
+        <Card className="mb-4 py-0">
+          <div className="max-h-[420px] overflow-y-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="pl-6">Date</TableHead>
+                  <TableHead>Description</TableHead>
+                  <TableHead>Amount</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead>Category</TableHead>
+                  <TableHead>Account</TableHead>
+                  <TableHead className="pr-6"></TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {newRows.map((row) => (
+                  <TableRow key={row.id}>
+                    <TableCell className="pl-6">
+                      <Input type="date" value={row.date} onChange={(e) => updateRow(row.id, { date: e.target.value })} className="w-40" />
+                    </TableCell>
+                    <TableCell>
+                      <Input type="text" placeholder="Description" value={row.description}
+                        onChange={(e) => updateRow(row.id, { description: e.target.value })} className="min-w-[160px]" />
+                    </TableCell>
+                    <TableCell>
+                      <Input type="number" placeholder="Amount" step="0.01" value={row.amount}
+                        onChange={(e) => updateRow(row.id, { amount: e.target.value })} className="w-28" />
+                    </TableCell>
+                    <TableCell>
+                      <Select value={row.transaction_type} onValueChange={(v) => updateRow(row.id, { transaction_type: v })}>
+                        <SelectTrigger size="sm" className="w-[110px]"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Expense">Expense</SelectItem>
+                          <SelectItem value="Income">Income</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </TableCell>
+                    <TableCell>
+                      <Select value={row.category || ANY} onValueChange={(v) => updateRow(row.id, { category: v === ANY ? '' : v })}>
+                        <SelectTrigger size="sm" className="w-[150px]"><SelectValue placeholder="Category…" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={ANY}>Category…</SelectItem>
+                          {categories.data?.map((c) => <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </TableCell>
+                    <TableCell>
+                      <Input type="text" placeholder="Account" value={row.account}
+                        onChange={(e) => updateRow(row.id, { account: e.target.value })} className="w-28" />
+                    </TableCell>
+                    <TableCell className="pr-6">
+                      <Button variant="ghost" size="sm" disabled={newRows.length === 1} onClick={() => removeRow(row.id)}>
+                        <X className="size-4" />
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 border-t px-6 py-3">
+            <Button variant="outline" size="sm" onClick={addRow}>
+              <Plus className="size-4" /> Add row
+            </Button>
+            <Button size="sm" disabled={validRows.length === 0 || bulkCreateTxn.isPending} onClick={() => bulkCreateTxn.mutate()}>
+              {bulkCreateTxn.isPending
+                ? 'Saving…'
+                : `Save ${validRows.length} Transaction${validRows.length === 1 ? '' : 's'}`}
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => { setShowAddForm(false); setNewRows([emptyRow()]); }}>Cancel</Button>
+            {bulkCreateTxn.isError && <span className="text-sm text-destructive">{(bulkCreateTxn.error as Error).message}</span>}
+          </div>
         </Card>
       )}
 

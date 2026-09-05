@@ -1,15 +1,15 @@
 from datetime import date as date_type
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.db import get_session
-from app.models import Account, Category, Transaction, TransactionType
+from app.models import Account, Category, SyncStatus, Transaction, TransactionType
 from app.repositories.accounts import AccountRepository
 from app.repositories.categories import CategoryRepository
 from app.repositories.transactions import TransactionRepository
-from app.schemas import BulkDeleteIn, TransactionIn, TransactionOut
-from typing import Optional
+from app.schemas import BulkCreateIn, BulkDeleteIn, TransactionIn, TransactionOut, TransactionTrashOut
+from typing import List, Optional
 
 router = APIRouter(prefix="/api/transactions", tags=["transactions"])
 
@@ -25,18 +25,32 @@ def _to_out(txn: Transaction) -> TransactionOut:
     )
 
 
+def _to_trash_out(txn: Transaction) -> TransactionTrashOut:
+    can_permanently_delete = txn.last_synced_at is None or txn.sync_status == SyncStatus.synced
+    return TransactionTrashOut(
+        **_to_out(txn).model_dump(),
+        deleted_at=txn.deleted_at,
+        can_permanently_delete=can_permanently_delete,
+    )
+
+
 @router.get("", response_model=list[TransactionOut])
 def list_transactions(
-    year: Optional[int] = None, month: Optional[int] = None, category: Optional[str] = None,
-    account: Optional[str] = None, type: Optional[str] = None,
+    year: Optional[int] = None, month: Optional[int] = None,
+    category: Optional[List[str]] = Query(None), category_exclude: bool = False,
+    account: Optional[List[str]] = Query(None), account_exclude: bool = False,
+    type: Optional[str] = None,
     date_from: Optional[date_type] = None, date_to: Optional[date_type] = None,
     search: Optional[str] = None, session: Session = Depends(get_session),
 ):
     repo = TransactionRepository(session)
-    cat = CategoryRepository(session).get_by_name(category) if category else None
-    acct = AccountRepository(session).get_by_name(account) if account else None
+    cat_repo = CategoryRepository(session)
+    acct_repo = AccountRepository(session)
+    category_ids = [c.id for c in (cat_repo.get_by_name(n) for n in category) if c] if category else None
+    account_ids = [a.id for a in (acct_repo.get_by_name(n) for n in account) if a] if account else None
     rows = repo.filter(
-        year=year, month=month, category_id=cat.id if cat else None, account_id=acct.id if acct else None,
+        year=year, month=month, category_ids=category_ids, category_exclude=category_exclude,
+        account_ids=account_ids, account_exclude=account_exclude,
         transaction_type=type, date_from=date_from, date_to=date_to, search=search,
     )
     return [_to_out(t) for t in rows]
@@ -56,11 +70,69 @@ def create_transaction(payload: TransactionIn, session: Session = Depends(get_se
     return _to_out(txn)
 
 
+@router.post("/bulk", response_model=list[TransactionOut])
+def bulk_create_transactions(payload: BulkCreateIn, session: Session = Depends(get_session)):
+    cat_repo, acct_repo, tx_repo = CategoryRepository(session), AccountRepository(session), TransactionRepository(session)
+    created = []
+    for row in payload.transactions:
+        category = cat_repo.add(row.category)
+        account = acct_repo.get_or_create(row.account)
+        created.append(tx_repo.create(
+            date=row.date, description=row.description, amount=row.amount,
+            transaction_type=TransactionType(row.transaction_type), category=category, account=account,
+            notes=row.notes,
+        ))
+    session.commit()
+    return [_to_out(t) for t in created]
+
+
 @router.post("/bulk_delete")
 def bulk_delete_transactions(payload: BulkDeleteIn, session: Session = Depends(get_session)):
     count = TransactionRepository(session).bulk_soft_delete(payload.transaction_ids)
     session.commit()
     return {"deleted_count": count}
+
+
+@router.get("/trash", response_model=list[TransactionTrashOut])
+def list_trash(session: Session = Depends(get_session)):
+    rows = TransactionRepository(session).list_trash()
+    return [_to_trash_out(t) for t in rows]
+
+
+@router.post("/bulk_restore")
+def bulk_restore_transactions(payload: BulkDeleteIn, session: Session = Depends(get_session)):
+    count = TransactionRepository(session).bulk_restore(payload.transaction_ids)
+    session.commit()
+    return {"restored_count": count}
+
+
+@router.post("/bulk_permanent_delete")
+def bulk_permanent_delete_transactions(payload: BulkDeleteIn, session: Session = Depends(get_session)):
+    result = TransactionRepository(session).bulk_permanent_delete(payload.transaction_ids)
+    session.commit()
+    return result
+
+
+@router.post("/{transaction_id}/restore", response_model=TransactionOut)
+def restore_transaction(transaction_id: str, session: Session = Depends(get_session)):
+    txn = TransactionRepository(session).restore(transaction_id)
+    if not txn:
+        raise HTTPException(404, "Transaction not found in trash")
+    session.commit()
+    return _to_out(txn)
+
+
+@router.delete("/{transaction_id}/permanent")
+def permanent_delete_transaction(transaction_id: str, session: Session = Depends(get_session)):
+    result = TransactionRepository(session).permanent_delete(transaction_id)
+    if result == "not_found":
+        raise HTTPException(404, "Transaction not found")
+    if result == "not_trashed":
+        raise HTTPException(400, "Transaction is not in trash - delete it first")
+    if result == "blocked":
+        raise HTTPException(409, "This deletion hasn't synced to Google Sheets yet - wait for the next sync before permanently deleting")
+    session.commit()
+    return {"ok": True}
 
 
 @router.delete("/pending")

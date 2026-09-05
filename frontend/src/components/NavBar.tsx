@@ -10,6 +10,7 @@ const LINKS = [
   { to: '/import', label: 'Import' },
   { to: '/compare', label: 'Compare' },
   { to: '/conflicts', label: 'Conflicts' },
+  { to: '/trash', label: 'Trash' },
   { to: '/settings', label: 'Settings' },
   { to: '/logs', label: 'Logs' },
 ];

@@ -29,6 +29,11 @@ export interface Transaction {
   updated_at: string;
 }
 
+export interface TrashedTransaction extends Transaction {
+  deleted_at: string;
+  can_permanently_delete: boolean;
+}
+
 export interface Totals {
   income: number;
   expenses: number;

@@ -75,6 +75,15 @@ class TransactionOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class TransactionTrashOut(TransactionOut):
+    deleted_at: datetime
+    can_permanently_delete: bool
+
+
+class BulkCreateIn(BaseModel):
+    transactions: list[TransactionIn] = Field(min_length=1, max_length=200)
+
+
 class BudgetIn(BaseModel):
     category: str
     period_key: Optional[str] = None  # None = recurring monthly default

@@ -5,6 +5,7 @@ import { Transactions } from './pages/Transactions';
 import { Import } from './pages/Import';
 import { Compare } from './pages/Compare';
 import { Conflicts } from './pages/Conflicts';
+import { Trash } from './pages/Trash';
 import { Settings } from './pages/Settings';
 import { Logs } from './pages/Logs';
 
@@ -20,6 +21,7 @@ export function App() {
             <Route path="/import" element={<Import />} />
             <Route path="/compare" element={<Compare />} />
             <Route path="/conflicts" element={<Conflicts />} />
+            <Route path="/trash" element={<Trash />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/logs" element={<Logs />} />
           </Routes>
