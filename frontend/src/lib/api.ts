@@ -1,8 +1,9 @@
 import type {
   Account, AskResponse, Budget, BudgetAlert, BudgetVsActual, Category, CategoryDrilldownNode,
-  CategoryTotal, ChartPalette, ConflictRow, Forecast, Highlights, ImportCommitResult, ImportPreviewResult, ImportRowIn,
-  Insight, LlmStatus, MonthlyBreakdownRow, QuickAddResult, SavingsGoalProgress, SyncConfig, SyncLogEntry,
-  SyncStatus, Totals, Transaction, TrashedTransaction, TrendForRange, ViewFilters,
+  CategoryTotal, CategoryTrend, CategoryVolatility, ChartPalette, ConflictRow, Forecast, Highlights,
+  ImportCommitResult, ImportPreviewResult, ImportRowIn, Insight, LlmStatus, MonthlyBreakdownRow, QuickAddResult,
+  SavingsGoalProgress, SpendingPattern, SyncConfig, SyncLogEntry, SyncStatus, Totals, Transaction, TrashedTransaction,
+  TrendForRange, ViewFilters,
 } from './types';
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -57,6 +58,12 @@ export const api = {
   budgetAlerts: () => request<BudgetAlert[]>('/api/dashboard/budget_alerts'),
   forecast: (range: string, dateBounds?: DateBounds) =>
     request<Forecast>(`/api/dashboard/forecast${qs({ range, ...dateBounds })}`),
+  categoryTrends: (range: string, type = 'Expense', dateBounds?: DateBounds) =>
+    request<CategoryTrend[]>(`/api/dashboard/category_trends${qs({ range, type, ...dateBounds })}`),
+  categoryVolatility: (months = 6) =>
+    request<CategoryVolatility[]>(`/api/dashboard/category_volatility${qs({ months })}`),
+  spendingPattern: (range: string, dateBounds?: DateBounds) =>
+    request<SpendingPattern>(`/api/dashboard/spending_pattern${qs({ range, ...dateBounds })}`),
 
   // ---------- savings goal ----------
   getSavingsGoal: () => request<{ period_key: string; goal_amount: number | null }>('/api/savings_goal'),

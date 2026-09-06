@@ -457,6 +457,83 @@ def detect_anomalies(session: Session, date_from: Optional[date_type], date_to: 
     return anomalies[:limit]
 
 
+def category_volatility(session: Session, months: int = 6, min_months: int = 3) -> list[dict]:
+    """Classifies each expense category as stable/moderate/volatile by the
+    coefficient of variation (stdev / mean) of its monthly totals over the
+    last `months` FULLY-ELAPSED calendar months (the current, in-progress
+    month is excluded so its necessarily-partial total doesn't read as a
+    sudden drop). A category needs at least `min_months` of those months with
+    any spending at all before it's judged - one or two data points can't
+    say anything about consistency. A low CoV (stable) is a good candidate
+    for a tight fixed budget goal; a high CoV (volatile) swings too much
+    month to month for a single number to mean much - it needs a bigger
+    cushion or shouldn't be budgeted as a fixed amount at all."""
+    this_month_start = period_start(period_key_for(date_type.today()))
+    window_start = this_month_start
+    for _ in range(months):
+        window_start = period_start(period_key_for(window_start - timedelta(days=1)))
+    window_end = this_month_start - timedelta(days=1)
+
+    per_cat_month: dict[str, dict[str, float]] = {}
+    for t in session.scalars(_base_query(window_start, window_end)):
+        if t.transaction_type != TransactionType.expense or not t.category.counts_as_expense:
+            continue
+        bucket = per_cat_month.setdefault(t.category.name, {})
+        pk = period_key_for(t.date)
+        bucket[pk] = bucket.get(pk, 0.0) + t.amount
+
+    results = []
+    for cat, month_totals in per_cat_month.items():
+        values = list(month_totals.values())
+        if len(values) < min_months:
+            continue
+        mean = sum(values) / len(values)
+        variance = sum((v - mean) ** 2 for v in values) / len(values)
+        stdev = variance ** 0.5
+        cov = stdev / mean if mean else 0.0
+        status = "volatile" if cov >= 0.5 else "moderate" if cov >= 0.2 else "stable"
+        results.append({
+            "category": cat, "months_observed": len(values), "avg_monthly": round(mean, 2),
+            "stdev": round(stdev, 2), "coefficient_of_variation": round(cov, 4), "status": status,
+        })
+    results.sort(key=lambda r: -r["coefficient_of_variation"])
+    return results
+
+
+_DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+
+
+def spending_pattern(session: Session, date_from: Optional[date_type] = None,
+                      date_to: Optional[date_type] = None) -> dict:
+    """Where expense spending concentrates within a week (which day of the
+    week) and within a month (which third of it) - a purely descriptive
+    breakdown, no threshold or judgment involved. Explains, for example, why
+    an early-month 'at this pace' forecast often overshoots if spending is
+    naturally front-loaded (rent/bills on the 1st), and can surface a
+    'weekend spender' pattern that a category-only view wouldn't show."""
+    by_dow = {name: 0.0 for name in _DAY_NAMES}
+    by_third = {"1st (days 1-10)": 0.0, "2nd (days 11-20)": 0.0, "3rd (days 21+)": 0.0}
+    total = 0.0
+    for t in session.scalars(_base_query(date_from, date_to)):
+        if t.transaction_type != TransactionType.expense:
+            continue
+        total += t.amount
+        by_dow[_DAY_NAMES[t.date.weekday()]] += t.amount
+        third_key = "1st (days 1-10)" if t.date.day <= 10 else "2nd (days 11-20)" if t.date.day <= 20 else "3rd (days 21+)"
+        by_third[third_key] += t.amount
+
+    return {
+        "by_day_of_week": [
+            {"day": d, "total": round(by_dow[d], 2), "pct": round(by_dow[d] / total, 4) if total else 0.0}
+            for d in _DAY_NAMES
+        ],
+        "by_month_third": [
+            {"label": k, "total": round(v, 2), "pct": round(v / total, 4) if total else 0.0}
+            for k, v in by_third.items()
+        ],
+    }
+
+
 def period_start(period_key: str) -> date_type:
     year, month = period_key.split("-")
     return date_type(int(year), int(month), 1)

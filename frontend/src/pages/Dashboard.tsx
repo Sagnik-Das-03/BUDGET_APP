@@ -13,6 +13,9 @@ import { TrendChart } from '../components/TrendChart';
 import { CategoryChart } from '../components/CategoryChart';
 import { BudgetChart } from '../components/BudgetChart';
 import { InsightCard } from '../components/InsightCard';
+import { CategoryTrends } from '../components/CategoryTrends';
+import { CategoryConsistency } from '../components/CategoryConsistency';
+import { SpendingPatternCard } from '../components/SpendingPatternCard';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 const RANGE_LABEL: Record<RangeKey, string> = {
@@ -223,6 +226,9 @@ export function Dashboard() {
         <TrendChart data={trend.data} />
         <CategoryChart tree={categoryTree.data} rangeLabel={categoryLabel} />
         <BudgetChart rows={budget.data} />
+        <CategoryTrends range={effectiveRange} dateBounds={effectiveBounds} />
+        <CategoryConsistency />
+        <SpendingPatternCard range={effectiveRange} dateBounds={effectiveBounds} />
       </div>
     </>
   );

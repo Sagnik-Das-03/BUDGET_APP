@@ -161,6 +161,35 @@ export interface CategoryPace {
   status: 'on_track' | 'watch' | 'over';
 }
 
+export interface CategoryTrend {
+  category: string;
+  current: number;
+  previous: number;
+  delta_abs: number;
+  delta_pct: number | null;
+}
+
+export interface CategoryVolatility {
+  category: string;
+  months_observed: number;
+  avg_monthly: number;
+  stdev: number;
+  coefficient_of_variation: number;
+  status: 'stable' | 'moderate' | 'volatile';
+}
+
+export interface SpendingPatternRow {
+  day?: string;
+  label?: string;
+  total: number;
+  pct: number;
+}
+
+export interface SpendingPattern {
+  by_day_of_week: SpendingPatternRow[];
+  by_month_third: SpendingPatternRow[];
+}
+
 export interface Forecast {
   range: string;
   supported: boolean;

@@ -83,6 +83,26 @@ def highlights(range: str = "this_month", date_from: Optional[date_type] = None,
     return result
 
 
+@router.get("/category_trends")
+def category_trends(range: str = "this_month", type: str = "Expense",
+                     date_from: Optional[date_type] = None, date_to: Optional[date_type] = None,
+                     session: Session = Depends(get_session)):
+    d_from, d_to = _resolve_range(range, date_from, date_to)
+    return calc.category_trends(session, range, d_from, d_to, transaction_type=type)
+
+
+@router.get("/category_volatility")
+def category_volatility(months: int = 6, session: Session = Depends(get_session)):
+    return calc.category_volatility(session, months=months)
+
+
+@router.get("/spending_pattern")
+def spending_pattern(range: str = "this_month", date_from: Optional[date_type] = None,
+                      date_to: Optional[date_type] = None, session: Session = Depends(get_session)):
+    d_from, d_to = _resolve_range(range, date_from, date_to)
+    return calc.spending_pattern(session, d_from, d_to)
+
+
 @router.get("/budget_vs_actual")
 def budget_vs_actual(period_key: Optional[str] = None, session: Session = Depends(get_session)):
     pk = period_key or period_key_for(date_type.today())
