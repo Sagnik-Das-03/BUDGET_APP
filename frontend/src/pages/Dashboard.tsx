@@ -18,6 +18,7 @@ import { CategoryConsistency } from '../components/CategoryConsistency';
 import { SpendingPatternCard } from '../components/SpendingPatternCard';
 import { SavingsRateTrendChart } from '../components/SavingsRateTrendChart';
 import { EssentialSplitCard } from '../components/EssentialSplitCard';
+import { SortableGrid } from '../components/SortableGrid';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 const RANGE_LABEL: Record<RangeKey, string> = {
@@ -257,16 +258,21 @@ export function Dashboard() {
         <InsightCard range={effectiveRange} dateBounds={effectiveBounds} label={categoryLabel} />
       </div>
 
-      <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
-        <TrendChart data={trend.data} />
-        <CategoryChart tree={categoryTree.data} rangeLabel={categoryLabel} />
-        <BudgetChart rows={budget.data} />
-        <CategoryTrends range={effectiveRange} dateBounds={effectiveBounds} />
-        <CategoryConsistency />
-        <SpendingPatternCard range={effectiveRange} dateBounds={effectiveBounds} />
-        <SavingsRateTrendChart rows={monthlyBreakdown.data} />
-        <EssentialSplitCard data={essentialSplit.data} />
-      </div>
+      <SortableGrid
+        storageKey="dashboard.cardOrder"
+        handle
+        className="grid grid-cols-1 gap-5 md:grid-cols-2"
+        items={[
+          { id: 'trend', node: <TrendChart data={trend.data} /> },
+          { id: 'category', node: <CategoryChart tree={categoryTree.data} rangeLabel={categoryLabel} /> },
+          { id: 'budget', node: <BudgetChart rows={budget.data} /> },
+          { id: 'category-trends', node: <CategoryTrends range={effectiveRange} dateBounds={effectiveBounds} /> },
+          { id: 'category-consistency', node: <CategoryConsistency /> },
+          { id: 'spending-pattern', node: <SpendingPatternCard range={effectiveRange} dateBounds={effectiveBounds} /> },
+          { id: 'savings-rate-trend', node: <SavingsRateTrendChart rows={monthlyBreakdown.data} /> },
+          { id: 'essential-split', node: <EssentialSplitCard data={essentialSplit.data} /> },
+        ]}
+      />
     </>
   );
 }

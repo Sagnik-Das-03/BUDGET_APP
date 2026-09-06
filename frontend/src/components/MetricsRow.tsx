@@ -1,6 +1,7 @@
 import { CalendarDays, Receipt, TrendingDown, TrendingUp, Trophy } from 'lucide-react';
 import type { Highlights } from '../lib/types';
 import { fmtMoney, fmtMoneySigned } from '../lib/format';
+import { SortableGrid, type SortableGridItem } from './SortableGrid';
 import { Card, CardContent } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 
@@ -38,38 +39,58 @@ export function MetricsRow({ highlights }: { highlights: Highlights | undefined 
   // sensibly no matter the sign of either side.
   const delta = comparison?.net_delta_abs;
 
-  return (
-    <div className="mb-5 flex flex-wrap gap-3">
-      <MetricChip
-        icon={<Trophy className="size-4" />}
-        label="Top Category"
-        value={
-          highlights?.top_category
-            ? `${highlights.top_category.category} (${fmtMoney(highlights.top_category.total)})`
-            : '—'
-        }
-      />
-      <MetricChip
-        icon={<Receipt className="size-4" />}
-        label="Transactions"
-        value={highlights?.transaction_count ?? '—'}
-      />
-      <MetricChip
-        icon={<CalendarDays className="size-4" />}
-        label="Avg Daily Spend"
-        value={highlights ? `${fmtMoney(highlights.avg_daily_spend)} / day` : '—'}
-      />
-      <MetricChip
-        icon={delta !== null && delta !== undefined && delta < 0 ? <TrendingDown className="size-4" /> : <TrendingUp className="size-4" />}
-        label="vs Previous Period"
-        value={
-          !comparison || delta === undefined ? '—' : (
-            <span className={cn(delta >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-destructive')}>
-              {delta >= 0 ? '▲' : '▼'} {fmtMoneySigned(delta)} net
-            </span>
-          )
-        }
-      />
-    </div>
-  );
+  const items: SortableGridItem[] = [
+    {
+      id: 'top-category',
+      node: (
+        <MetricChip
+          icon={<Trophy className="size-4" />}
+          label="Top Category"
+          value={
+            highlights?.top_category
+              ? `${highlights.top_category.category} (${fmtMoney(highlights.top_category.total)})`
+              : '—'
+          }
+        />
+      ),
+    },
+    {
+      id: 'transactions',
+      node: (
+        <MetricChip
+          icon={<Receipt className="size-4" />}
+          label="Transactions"
+          value={highlights?.transaction_count ?? '—'}
+        />
+      ),
+    },
+    {
+      id: 'avg-daily-spend',
+      node: (
+        <MetricChip
+          icon={<CalendarDays className="size-4" />}
+          label="Avg Daily Spend"
+          value={highlights ? `${fmtMoney(highlights.avg_daily_spend)} / day` : '—'}
+        />
+      ),
+    },
+    {
+      id: 'vs-previous-period',
+      node: (
+        <MetricChip
+          icon={delta !== null && delta !== undefined && delta < 0 ? <TrendingDown className="size-4" /> : <TrendingUp className="size-4" />}
+          label="vs Previous Period"
+          value={
+            !comparison || delta === undefined ? '—' : (
+              <span className={cn(delta >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-destructive')}>
+                {delta >= 0 ? '▲' : '▼'} {fmtMoneySigned(delta)} net
+              </span>
+            )
+          }
+        />
+      ),
+    },
+  ];
+
+  return <SortableGrid storageKey="dashboard.metricsOrder" items={items} className="mb-5 flex flex-wrap gap-3" />;
 }

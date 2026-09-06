@@ -192,11 +192,18 @@ export interface SpendingPattern {
   by_month_third: SpendingPatternRow[];
 }
 
+export interface EssentialSplitCategory {
+  category: string;
+  total: number;
+}
+
 export interface EssentialSplit {
   essential: number;
   discretionary: number;
   essential_pct: number;
   discretionary_pct: number;
+  essential_categories: EssentialSplitCategory[];
+  discretionary_categories: EssentialSplitCategory[];
 }
 
 export interface SavingsStreak {

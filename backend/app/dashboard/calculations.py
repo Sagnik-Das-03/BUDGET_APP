@@ -564,21 +564,33 @@ def essential_vs_discretionary(session: Session, date_from: Optional[date_type] 
     them) into essential (Category.is_essential=True - Rent/Utilities/etc by
     default) vs discretionary. is_essential is a user-editable judgment call
     (see Settings, and DEFAULT_CATEGORIES' seeded starting guess), not
-    something this function determines on its own."""
-    essential = 0.0
-    discretionary = 0.0
+    something this function determines on its own. Also breaks each side down
+    by category (sorted by amount) so the UI can show which categories
+    actually make up "essential" vs "discretionary", not just the two totals."""
+    essential_by_cat: dict[str, float] = {}
+    discretionary_by_cat: dict[str, float] = {}
     for t in session.scalars(_base_query(date_from, date_to)):
         if t.transaction_type != TransactionType.expense or not t.category.counts_as_expense:
             continue
-        if t.category.is_essential:
-            essential += t.amount
-        else:
-            discretionary += t.amount
+        bucket = essential_by_cat if t.category.is_essential else discretionary_by_cat
+        bucket[t.category.name] = bucket.get(t.category.name, 0.0) + t.amount
+
+    essential = sum(essential_by_cat.values())
+    discretionary = sum(discretionary_by_cat.values())
     total = essential + discretionary
+
+    def _rows(by_cat: dict[str, float]) -> list[dict]:
+        return sorted(
+            ({"category": name, "total": round(v, 2)} for name, v in by_cat.items()),
+            key=lambda r: -r["total"],
+        )
+
     return {
         "essential": round(essential, 2), "discretionary": round(discretionary, 2),
         "essential_pct": round(essential / total, 4) if total else 0.0,
         "discretionary_pct": round(discretionary / total, 4) if total else 0.0,
+        "essential_categories": _rows(essential_by_cat),
+        "discretionary_categories": _rows(discretionary_by_cat),
     }
 
 
