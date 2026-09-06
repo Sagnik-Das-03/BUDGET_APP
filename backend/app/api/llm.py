@@ -221,8 +221,8 @@ _QUICK_ADD_FILLER_WORDS = re.compile(r"\b(spent|paid|got|received|for|on|of|a|an
 def _extract_quick_add_description(raw_text: str) -> str:
     """Derives the description from the user's own words via plain string
     manipulation rather than asking the model to echo it back - constrained
-    JSON decoding proved reliable for the enum/numeric fields below, but
-    testing showed it hallucinating this one free-text field outright (e.g.
+    JSON decoding proved reliable for the enum fields below, but testing
+    showed it hallucinating this one free-text field outright (e.g.
     "Zomato 250 today" came back with description "Anda") even with the
     schema and prompt both saying to copy it verbatim."""
     # Date words first: an ordinal like "2nd" would otherwise have its leading
@@ -234,14 +234,37 @@ def _extract_quick_add_description(raw_text: str) -> str:
     return cleaned or raw_text.strip()
 
 
+def _extract_quick_add_amount(raw_text: str) -> Optional[float]:
+    """Derives the amount from the user's own text via the same regex used to
+    STRIP it when building the description, rather than trusting the model's
+    numeric field - testing showed the model occasionally emitting a
+    nonsensical near-zero figure (e.g. 0.000000000000000001) instead of the
+    actual amount, even under schema-constrained decoding ("180" in "coffee
+    at starbucks 180 today" became that, not 180). Date words are stripped
+    first so a phrase like "2 days ago" doesn't have its "2" mistaken for
+    the amount."""
+    cleaned = _QUICK_ADD_DATE_WORDS.sub(" ", raw_text)
+    match = _QUICK_ADD_AMOUNT.search(cleaned)
+    if not match:
+        return None
+    try:
+        value = float(re.sub(r"[^\d.]", "", match.group()))
+    except ValueError:
+        return None
+    return value if value > 0 else None
+
+
 @router.post("/quick_add", response_model=QuickAddOut)
 def quick_add(payload: QuickAddIn, session: Session = Depends(get_session)):
     """Parses a one-line description like 'Zomato 250 today' or 'got salary
     87000 yesterday' into a draft transaction for the user to review before
     saving - never creates anything itself. days_ago (a small integer) is
     used instead of asking the model for an absolute date, since that's a
-    much safer thing for it to get right than date arithmetic; description is
-    derived in Python (see _extract_quick_add_description), not the model."""
+    much safer thing for it to get right than date arithmetic; description
+    and amount are both derived in Python from the user's own text (see
+    _extract_quick_add_description/_extract_quick_add_amount), the model's
+    own values there are only a fallback - only category/transaction_type/
+    days_ago are trusted from the model's structured output."""
     text = payload.text.strip()
     if not text:
         raise HTTPException(400, "Empty input")
@@ -272,12 +295,19 @@ def quick_add(payload: QuickAddIn, session: Session = Depends(get_session)):
     prompt = f'Today: {date_type.today().isoformat()}\nUser input: "{text}"\nExtract this as a transaction.'
     try:
         parsed = llm_router.complete_json(
-            "quick_add", prompt, system_message=system_message, schema=schema, max_output_tokens=40,
+            # 64, not 40 - 40 was occasionally too tight to finish the closing
+            # brace for a longer category name (e.g. "Quick-Commerce"),
+            # producing a truncated, unparseable JSON string.
+            "quick_add", prompt, system_message=system_message, schema=schema, max_output_tokens=64,
         )
     except Exception as e:
         raise HTTPException(503, f"Couldn't understand that ({e})") from e
 
-    amount = float(parsed.get("amount") or 0)
+    # Prefer the amount found directly in the user's own text over the
+    # model's numeric field - see _extract_quick_add_amount's docstring.
+    amount = _extract_quick_add_amount(text)
+    if amount is None:
+        amount = float(parsed.get("amount") or 0)
     if amount <= 0:
         raise HTTPException(422, "Couldn't figure out an amount from that - try including a number")
 
