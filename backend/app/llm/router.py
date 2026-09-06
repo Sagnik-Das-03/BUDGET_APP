@@ -44,7 +44,14 @@ class LLMRouter:
             if not path.exists():
                 raise RuntimeError(f"Model file not found: {path}")
             logger.info("Loading LLM model %r from %s", model_key, path)
-            self._engines[model_key] = litert_lm.Engine(str(path))
+            try:
+                logger.info("Trying GPU backend for %r (~2.7x faster inference once loaded, per local benchmark)", model_key)
+                self._engines[model_key] = litert_lm.Engine(str(path), backend=litert_lm.Backend.GPU())
+            except Exception:
+                # Not every machine has a working WebGPU backend - fall back
+                # to CPU rather than making AI features unavailable entirely.
+                logger.exception("GPU backend failed for %r, falling back to CPU", model_key)
+                self._engines[model_key] = litert_lm.Engine(str(path), backend=litert_lm.Backend.CPU())
         return self._engines[model_key]
 
     def warm_up(self) -> None:

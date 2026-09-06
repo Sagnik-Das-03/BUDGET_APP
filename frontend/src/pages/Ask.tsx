@@ -1,5 +1,5 @@
 import { useMutation } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Send } from 'lucide-react';
 import { api } from '../lib/api';
 import { useElapsedSeconds } from '../lib/useElapsedSeconds';
@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input';
 interface Exchange {
   question: string;
   answer: string;
+  durationSec?: number;
 }
 
 const EXAMPLES = [
@@ -22,9 +23,10 @@ export function Ask() {
   const [question, setQuestion] = useState('');
   const [history, setHistory] = useState<Exchange[]>([]);
 
+  const startRef = useRef(0);
   const ask = useMutation({
     mutationFn: (q: string) => api.ask(q),
-    onSuccess: (res, q) => setHistory((h) => [...h, { question: q, answer: res.answer }]),
+    onSuccess: (res, q) => setHistory((h) => [...h, { question: q, answer: res.answer, durationSec: (Date.now() - startRef.current) / 1000 }]),
     onError: (err: Error, q) => setHistory((h) => [...h, { question: q, answer: `Error: ${err.message}` }]),
   });
   const elapsed = useElapsedSeconds(ask.isPending);
@@ -32,6 +34,7 @@ export function Ask() {
   function submit(q: string) {
     const trimmed = q.trim();
     if (!trimmed || ask.isPending) return;
+    startRef.current = Date.now();
     ask.mutate(trimmed);
     setQuestion('');
   }
@@ -71,6 +74,9 @@ export function Ask() {
             </div>
             <div className="self-start max-w-[80%] rounded-lg bg-muted px-3.5 py-2 text-sm">
               {h.answer}
+              {h.durationSec !== undefined && (
+                <div className="mt-1 text-xs text-muted-foreground">Answered in {h.durationSec.toFixed(1)}s</div>
+              )}
             </div>
           </div>
         ))}

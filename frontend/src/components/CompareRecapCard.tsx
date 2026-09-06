@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Sparkles } from 'lucide-react';
 import { api } from '../lib/api';
 import { useElapsedSeconds } from '../lib/useElapsedSeconds';
+import { useLastDuration } from '../lib/useLastDuration';
 import { ModelBadge } from './ModelBadge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -32,6 +33,7 @@ export function CompareRecapCard({ labelA, labelB, dateFromA, dateToA, dateFromB
     gcTime: 30 * 60 * 1000,
   });
   const elapsed = useElapsedSeconds(recap.isFetching);
+  const duration = useLastDuration(recap.isFetching);
 
   return (
     <Card className="mt-6">
@@ -54,7 +56,12 @@ export function CompareRecapCard({ labelA, labelB, dateFromA, dateToA, dateFromB
         )}
         {recap.isError && !recap.isFetching && <p className="text-sm text-destructive">{(recap.error as Error).message}</p>}
         {!recap.isFetching && !recap.isError && recap.data && (
-          <p className="text-sm leading-relaxed">{recap.data.recap}</p>
+          <>
+            <p className="text-sm leading-relaxed">{recap.data.recap}</p>
+            {duration !== null && (
+              <p className="mt-2 text-xs text-muted-foreground">Generated in {duration.toFixed(1)}s</p>
+            )}
+          </>
         )}
         {!recap.isFetching && !recap.isError && !recap.data && (
           <p className="text-sm text-muted-foreground">
