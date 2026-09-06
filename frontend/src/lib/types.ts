@@ -162,7 +162,8 @@ export interface CategoryPace {
 }
 
 export interface Forecast {
-  period_key: string;
+  range: string;
+  supported: boolean;
   is_current: boolean;
   days_elapsed: number;
   days_in_period: number;

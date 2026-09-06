@@ -214,19 +214,26 @@ def _pct_delta(current: float, previous: float) -> Optional[float]:
     return round((current - previous) / abs(previous), 4)
 
 
+def _previous_range_bounds(range_: str, date_from: Optional[date_type]) -> Optional[tuple[date_type, date_type]]:
+    """The immediately preceding range of the same kind (previous week/month/year) -
+    shared by period_comparison() and category_trends(). None for all_time/custom,
+    which have no natural 'previous period' to compare against."""
+    if not date_from:
+        return None
+    fn = {
+        "this_week": lambda: range_this_week(date_from - timedelta(days=7)),
+        "this_month": lambda: _range_previous_month(date_from),
+        "this_year": lambda: range_previous_year(date_from),
+    }.get(range_)
+    return fn() if fn else None
+
+
 def period_comparison(session: Session, range_: str, date_from: Optional[date_type],
                        date_to: Optional[date_type]) -> Optional[dict]:
     """Compares the current range's totals to the immediately preceding range of
     the same kind (previous week/month/year). None for all_time/custom, which have
     no natural 'previous period'."""
-    prev_range = {
-        "this_week": lambda: range_this_week(date_from - timedelta(days=7)) if date_from else None,
-        "this_month": lambda: _range_previous_month(date_from) if date_from else None,
-        "this_year": lambda: range_previous_year(date_from) if date_from else None,
-    }.get(range_)
-    if not prev_range:
-        return None
-    prev = prev_range()
+    prev = _previous_range_bounds(range_, date_from)
     if not prev:
         return None
     cur = totals(session, date_from, date_to)
@@ -237,6 +244,31 @@ def period_comparison(session: Session, range_: str, date_from: Optional[date_ty
         "net_delta_pct": _pct_delta(cur["net"], prv["net"]),
         "previous_range": {"date_from": prev[0].isoformat(), "date_to": prev[1].isoformat()},
     }
+
+
+def category_trends(session: Session, range_: str, date_from: Optional[date_type],
+                     date_to: Optional[date_type], transaction_type: str = "Expense") -> list[dict]:
+    """Per-category version of period_comparison() - how much more/less each
+    category moved vs. the immediately preceding range of the same kind.
+    Empty for all_time/custom, which have no natural 'previous period'.
+    Sorted by absolute rupee swing (not percentage) so a category that went
+    from Rs 50 to Rs 150 (a huge 200% jump, but trivial in real money) doesn't
+    outrank one that went from Rs 20,000 to Rs 24,000 (a modest 20% jump that
+    actually moved the budget)."""
+    prev = _previous_range_bounds(range_, date_from)
+    if not prev:
+        return []
+    cur = {r["category"]: r["total"] for r in by_category(session, date_from, date_to, transaction_type=transaction_type)}
+    prv = {r["category"]: r["total"] for r in by_category(session, *prev, transaction_type=transaction_type)}
+    rows = []
+    for name in set(cur) | set(prv):
+        c, p = cur.get(name, 0.0), prv.get(name, 0.0)
+        rows.append({
+            "category": name, "current": round(c, 2), "previous": round(p, 2),
+            "delta_abs": round(c - p, 2), "delta_pct": _pct_delta(c, p),
+        })
+    rows.sort(key=lambda r: -abs(r["delta_abs"]))
+    return rows
 
 
 def _range_previous_month(current_start: date_type) -> tuple[date_type, date_type]:
@@ -291,20 +323,47 @@ def budget_alerts(session: Session, period_key: str, warning_threshold: float = 
     return alerts
 
 
-def forecast(session: Session, period_key: Optional[str] = None, as_of: Optional[date_type] = None) -> dict:
-    """Projects a period's totals (and each budgeted category's spend) to
-    period-end by extrapolating the current daily pace: amount-so-far divided
-    by days elapsed so far, multiplied by the period's total length. A naive
-    but transparent projection - it has no idea a big recurring bill lands on
-    the 28th, it just assumes money keeps flowing in/out at the same average
-    rate it has so far. Only meaningful for the period currently in progress
-    (is_current=True); for a fully-elapsed past period, days_elapsed is
-    clamped to the period's full length, so pace collapses to 1x and the
-    'projected' figures just equal the final actuals - callers should treat
-    that as a signal to hide/relabel the forecast rather than show it as a
-    live prediction."""
-    pk = period_key or period_key_for(date_type.today())
-    p_start, p_end = period_start(pk), period_end(pk)
+def forecast(session: Session, range_key: str = "this_month", date_from: Optional[date_type] = None,
+             date_to: Optional[date_type] = None, as_of: Optional[date_type] = None) -> dict:
+    """Projects a range's totals (and, for this_month, each budgeted
+    category's spend) to the range's end by extrapolating the current daily
+    pace: amount-so-far divided by days elapsed so far, multiplied by the
+    range's total length. A naive but transparent projection - it has no idea
+    a big recurring bill lands on the 28th, it just assumes money keeps
+    flowing in/out at the same average rate it has so far.
+
+    range_key is one of "this_week"/"this_month"/"this_year" (a fixed
+    calendar period) or "custom" (caller-supplied date_from/date_to, e.g. a
+    drilled-into month on the Dashboard) - "all_time" has no end to project
+    toward, so it comes back with supported=False rather than a number that
+    would just be misleading.
+
+    Category budget pacing only applies to range_key="this_month" since
+    goals are stored per-month (see BudgetRepository) - a week or year has
+    no natural budget of its own to pace against.
+
+    Only meaningful for a range currently in progress (is_current=True); for
+    a fully-elapsed past range, days_elapsed is clamped to the range's full
+    length, so pace collapses to 1x and the 'projected' figures just equal
+    the final actuals - callers should treat that as a signal to hide/relabel
+    the forecast rather than show it as a live prediction."""
+    if range_key == "all_time":
+        return {
+            "range": "all_time", "supported": False, "is_current": False,
+            "days_elapsed": 0, "days_in_period": 0,
+            "income_so_far": 0.0, "expenses_so_far": 0.0, "net_so_far": 0.0,
+            "projected_income": 0.0, "projected_expenses": 0.0, "projected_net": 0.0,
+            "projected_savings_rate": 0.0, "category_pace": [],
+        }
+
+    if range_key == "custom":
+        if not date_from or not date_to:
+            raise ValueError("range='custom' requires both date_from and date_to")
+        p_start, p_end = date_from, date_to
+    else:
+        range_fn = {"this_week": range_this_week, "this_month": range_this_month, "this_year": range_this_year}
+        p_start, p_end = range_fn.get(range_key, range_this_month)(as_of)
+
     today = as_of or date_type.today()
     days_in_period = (p_end - p_start).days + 1
     is_current = p_start <= today <= p_end
@@ -318,25 +377,26 @@ def forecast(session: Session, period_key: Optional[str] = None, as_of: Optional
     projected_net = round(projected_income - projected_expenses, 2)
     projected_savings_rate = round(projected_net / projected_income, 4) if projected_income else 0.0
 
-    goals = BudgetRepository(session).for_period(pk)
-    actuals = {row["category"]: row["total"] for row in by_category(
-        session, date_from=p_start, date_to=counted_through, transaction_type="Expense")}
     category_pace = []
-    for cat, goal in goals.items():
-        if goal <= 0:
-            continue
-        actual = actuals.get(cat, 0.0)
-        projected = round(actual * pace, 2)
-        pct = projected / goal
-        status = "over" if pct >= 1.0 else "watch" if pct >= 0.9 else "on_track"
-        category_pace.append({
-            "category": cat, "goal": goal, "actual": round(actual, 2),
-            "projected": projected, "pct": round(pct, 4), "status": status,
-        })
-    category_pace.sort(key=lambda r: -r["pct"])
+    if range_key == "this_month":
+        goals = BudgetRepository(session).for_period(period_key_for(p_start))
+        actuals = {row["category"]: row["total"] for row in by_category(
+            session, date_from=p_start, date_to=counted_through, transaction_type="Expense")}
+        for cat, goal in goals.items():
+            if goal <= 0:
+                continue
+            actual = actuals.get(cat, 0.0)
+            projected = round(actual * pace, 2)
+            pct = projected / goal
+            status = "over" if pct >= 1.0 else "watch" if pct >= 0.9 else "on_track"
+            category_pace.append({
+                "category": cat, "goal": goal, "actual": round(actual, 2),
+                "projected": projected, "pct": round(pct, 4), "status": status,
+            })
+        category_pace.sort(key=lambda r: -r["pct"])
 
     return {
-        "period_key": pk, "is_current": is_current,
+        "range": range_key, "supported": True, "is_current": is_current,
         "days_elapsed": days_elapsed, "days_in_period": days_in_period,
         "income_so_far": t["income"], "expenses_so_far": t["expenses"], "net_so_far": t["net"],
         "projected_income": projected_income, "projected_expenses": projected_expenses,

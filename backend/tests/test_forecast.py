@@ -25,7 +25,7 @@ def test_projects_totals_linearly_from_days_elapsed_so_far(session):
         _txn(tx_repo, category, account, day=day, amount=30.0)
     session.commit()
 
-    result = calc.forecast(session, "2026-09", as_of=date(2026, 9, 10))
+    result = calc.forecast(session, "this_month", as_of=date(2026, 9, 10))
 
     assert result["is_current"] is True
     assert result["days_elapsed"] == 10
@@ -43,7 +43,7 @@ def test_projected_savings_rate_uses_projected_figures_not_so_far_figures(sessio
     session.commit()
 
     # day 1 of 30 - pace multiplier is 30x
-    result = calc.forecast(session, "2026-09", as_of=date(2026, 9, 1))
+    result = calc.forecast(session, "this_month", as_of=date(2026, 9, 1))
 
     assert result["projected_income"] == 30000.0
     assert result["projected_expenses"] == 6000.0
@@ -65,7 +65,7 @@ def test_flags_a_category_pacing_to_exceed_its_budget_even_though_actual_so_far_
         _txn(tx_repo, category, account, day=day, amount=40.0)
     session.commit()
 
-    result = calc.forecast(session, "2026-09", as_of=date(2026, 9, 5))
+    result = calc.forecast(session, "this_month", as_of=date(2026, 9, 5))
 
     row = next(r for r in result["category_pace"] if r["category"] == "Shopping")
     assert row["actual"] == 200.0
@@ -80,14 +80,17 @@ def test_category_without_a_goal_is_excluded_from_pace_list(session):
     _txn(tx_repo, category, account, day=1, amount=500.0)
     session.commit()
 
-    result = calc.forecast(session, "2026-09", as_of=date(2026, 9, 5))
+    result = calc.forecast(session, "this_month", as_of=date(2026, 9, 5))
 
     assert result["category_pace"] == []
 
 
 def test_a_fully_elapsed_past_period_has_no_extrapolation(session):
     """Once the period is over, pace collapses to 1x - the 'projection' for a
-    closed month is just its final actual, not a forward-looking guess."""
+    closed month is just its final actual, not a forward-looking guess.
+    range="this_month" always means "whichever month as_of falls in", so a
+    past September viewed from October has to be expressed as a custom range
+    (exactly what the Dashboard's drill-into-a-past-month view already does)."""
     cat_repo, acct_repo, tx_repo = CategoryRepository(session), AccountRepository(session), TransactionRepository(session)
     category, account = cat_repo.get_by_name("Shopping"), acct_repo.get_or_create("Primary")
 
@@ -95,9 +98,72 @@ def test_a_fully_elapsed_past_period_has_no_extrapolation(session):
         _txn(tx_repo, category, account, day=day, amount=100.0)
     session.commit()
 
-    result = calc.forecast(session, "2026-09", as_of=date(2026, 10, 15))
+    result = calc.forecast(
+        session, "custom", date_from=date(2026, 9, 1), date_to=date(2026, 9, 30), as_of=date(2026, 10, 15),
+    )
 
     assert result["is_current"] is False
     assert result["days_elapsed"] == result["days_in_period"] == 30
     assert result["expenses_so_far"] == 500.0
     assert result["projected_expenses"] == 500.0
+
+
+def test_this_week_projects_to_end_of_the_calendar_week(session):
+    """2026-09-07 is a Monday - the week runs Mon 09-07 through Sun 09-13 (7
+    days). 1 day in, Rs 50 spent - at that pace the week projects to Rs 350."""
+    cat_repo, acct_repo, tx_repo = CategoryRepository(session), AccountRepository(session), TransactionRepository(session)
+    category, account = cat_repo.get_by_name("Shopping"), acct_repo.get_or_create("Primary")
+    tx_repo.create(date=date(2026, 9, 7), description="txn", amount=50.0,
+                    transaction_type=TransactionType.expense, category=category, account=account)
+    session.commit()
+
+    result = calc.forecast(session, "this_week", as_of=date(2026, 9, 7))
+
+    assert result["is_current"] is True
+    assert result["days_in_period"] == 7
+    assert result["days_elapsed"] == 1
+    assert result["expenses_so_far"] == 50.0
+    assert result["projected_expenses"] == 350.0
+    assert result["category_pace"] == []  # budgets are monthly - a week has nothing to pace against
+
+
+def test_this_year_projects_to_end_of_the_calendar_year(session):
+    cat_repo, acct_repo, tx_repo = CategoryRepository(session), AccountRepository(session), TransactionRepository(session)
+    category, account = cat_repo.get_by_name("Shopping"), acct_repo.get_or_create("Primary")
+    tx_repo.create(date=date(2026, 1, 1), description="txn", amount=3650.0,
+                    transaction_type=TransactionType.expense, category=category, account=account)
+    session.commit()
+
+    # 2026 is not a leap year (365 days) - day 1 of 365, Rs 3650 spent -> Rs 10/day pace
+    result = calc.forecast(session, "this_year", as_of=date(2026, 1, 1))
+
+    assert result["days_in_period"] == 365
+    assert result["days_elapsed"] == 1
+    assert result["projected_expenses"] == 3650.0 * 365
+
+
+def test_all_time_has_no_end_to_project_toward(session):
+    """There's no natural boundary to extrapolate an unbounded range to, so
+    all_time comes back explicitly unsupported rather than a number that
+    would just be misleading."""
+    result = calc.forecast(session, "all_time")
+    assert result["supported"] is False
+    assert result["is_current"] is False
+
+
+def test_custom_range_uses_the_given_bounds(session):
+    cat_repo, acct_repo, tx_repo = CategoryRepository(session), AccountRepository(session), TransactionRepository(session)
+    category, account = cat_repo.get_by_name("Shopping"), acct_repo.get_or_create("Primary")
+    tx_repo.create(date=date(2026, 3, 3), description="txn", amount=100.0,
+                    transaction_type=TransactionType.expense, category=category, account=account)
+    session.commit()
+
+    # A drilled-into past month (March 2026, long over) viewed "as of" September
+    result = calc.forecast(
+        session, "custom", date_from=date(2026, 3, 1), date_to=date(2026, 3, 31), as_of=date(2026, 9, 6),
+    )
+
+    assert result["is_current"] is False
+    assert result["days_in_period"] == 31
+    assert result["expenses_so_far"] == 100.0
+    assert result["projected_expenses"] == 100.0  # already fully elapsed - no extrapolation

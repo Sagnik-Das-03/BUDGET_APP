@@ -96,7 +96,8 @@ def budget_alerts(period_key: Optional[str] = None, threshold: float = 0.9, sess
 
 
 @router.get("/forecast")
-def forecast(period_key: Optional[str] = None, session: Session = Depends(get_session)):
-    return calc.forecast(session, period_key)
+def forecast(range: str = "this_month", date_from: Optional[date_type] = None,
+             date_to: Optional[date_type] = None, session: Session = Depends(get_session)):
+    return calc.forecast(session, range, date_from, date_to)
 
 

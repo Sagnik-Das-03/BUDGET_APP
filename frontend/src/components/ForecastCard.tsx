@@ -1,23 +1,39 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { Gauge, OctagonAlert, TriangleAlert } from 'lucide-react';
-import { api } from '../lib/api';
+import { api, type DateBounds } from '../lib/api';
 import { fmtMoney, fmtPct } from '../lib/format';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 
+const PERIOD_NOUN: Record<string, string> = {
+  this_week: 'week', this_month: 'month', this_year: 'year', custom: 'period',
+};
+
+interface ForecastCardProps {
+  range: string;
+  dateBounds?: DateBounds;
+}
+
 // Pure arithmetic (amount-so-far / days-elapsed * days-in-period), computed
 // server-side in calc.forecast() - no AI model involved, so this renders
 // immediately on every Dashboard load like the anomaly/alert banners.
-// Deliberately hidden for a period that's already over (is_current=false):
-// a "projection" for a closed month is just its final actual, not a
-// forward-looking guess, so there's nothing useful to show.
-export function ForecastCard() {
-  const forecast = useQuery({ queryKey: ['forecast'], queryFn: () => api.forecast() });
+// Deliberately hidden for a range with no natural end to project toward
+// (all_time, supported=false) or one that's already over (is_current=false,
+// e.g. a drilled-into past month) - a "projection" for a closed range is
+// just its final actual, not a forward-looking guess, so there's nothing
+// useful to show. Category budget pacing only ever comes back non-empty for
+// range="this_month", since goals are stored per-month.
+export function ForecastCard({ range, dateBounds }: ForecastCardProps) {
+  const forecast = useQuery({
+    queryKey: ['forecast', range, dateBounds?.date_from, dateBounds?.date_to],
+    queryFn: () => api.forecast(range, dateBounds),
+  });
   const f = forecast.data;
-  if (!f || !f.is_current) return null;
+  if (!f || !f.supported || !f.is_current) return null;
 
   const pacingRows = f.category_pace.filter((r) => r.status !== 'on_track');
+  const noun = PERIOD_NOUN[f.range] ?? 'period';
 
   return (
     <Card className="mb-5 py-4">
@@ -26,7 +42,7 @@ export function ForecastCard() {
           <Gauge className="size-4 text-primary" /> At This Pace
         </CardTitle>
         <p className="text-xs text-muted-foreground">
-          Day {f.days_elapsed} of {f.days_in_period} — projected to month-end if income and spending keep up at today's average daily rate.
+          Day {f.days_elapsed} of {f.days_in_period} — projected to {noun}-end if income and spending keep up at today's average daily rate.
         </p>
       </CardHeader>
       <CardContent className="flex flex-col gap-3 px-5">

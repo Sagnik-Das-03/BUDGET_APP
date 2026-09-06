@@ -211,7 +211,7 @@ export function Dashboard() {
       </div>
 
       <AlertBanner alerts={alerts.data} />
-      <ForecastCard />
+      <ForecastCard range={effectiveRange} dateBounds={effectiveBounds} />
       <MetricsRow highlights={highlights.data} />
       <KpiRow tiles={tiles} />
 

@@ -55,7 +55,8 @@ export const api = {
   budgetVsActual: () => request<BudgetVsActual[]>('/api/dashboard/budget_vs_actual'),
   monthlyBreakdown: () => request<MonthlyBreakdownRow[]>('/api/dashboard/monthly_breakdown'),
   budgetAlerts: () => request<BudgetAlert[]>('/api/dashboard/budget_alerts'),
-  forecast: (periodKey?: string) => request<Forecast>(`/api/dashboard/forecast${qs({ period_key: periodKey })}`),
+  forecast: (range: string, dateBounds?: DateBounds) =>
+    request<Forecast>(`/api/dashboard/forecast${qs({ range, ...dateBounds })}`),
 
   // ---------- savings goal ----------
   getSavingsGoal: () => request<{ period_key: string; goal_amount: number | null }>('/api/savings_goal'),
