@@ -17,6 +17,7 @@ import { CategoryTrends } from '../components/CategoryTrends';
 import { CategoryConsistency } from '../components/CategoryConsistency';
 import { SpendingPatternCard } from '../components/SpendingPatternCard';
 import { SavingsRateTrendChart } from '../components/SavingsRateTrendChart';
+import { EssentialSplitCard } from '../components/EssentialSplitCard';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 const RANGE_LABEL: Record<RangeKey, string> = {
@@ -264,6 +265,7 @@ export function Dashboard() {
         <CategoryConsistency />
         <SpendingPatternCard range={effectiveRange} dateBounds={effectiveBounds} />
         <SavingsRateTrendChart rows={monthlyBreakdown.data} />
+        <EssentialSplitCard data={essentialSplit.data} />
       </div>
     </>
   );

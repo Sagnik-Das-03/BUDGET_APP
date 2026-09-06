@@ -58,3 +58,23 @@ def test_sorted_by_absolute_rupee_swing_not_percentage(session):
 def test_empty_for_all_time_and_custom_which_have_no_natural_previous_period(session):
     assert calc.category_trends(session, "all_time", None, None) == []
     assert calc.category_trends(session, "custom", date(2026, 9, 1), date(2026, 9, 30)) == []
+
+
+def test_excludes_categories_that_do_not_count_as_a_real_expense(session):
+    """Regression test: SIP/Savings (counts_as_expense=False) were leaking
+    into Expense trends since by_category() only filters on transaction_type,
+    not counts_as_expense - a bigger SIP contribution showing up as a
+    "spending" swing is exactly the inconsistency the rest of the app (the
+    Expenses KPI, essential/discretionary split, anomaly detection) already
+    avoids by excluding these categories."""
+    cat_repo, acct_repo, tx_repo = CategoryRepository(session), AccountRepository(session), TransactionRepository(session)
+    sip, account = cat_repo.get_by_name("SIP"), acct_repo.get_or_create("Primary")
+    assert sip.counts_as_expense is False
+
+    _txn(tx_repo, sip, account, d=date(2026, 8, 5), amount=15000.0)
+    _txn(tx_repo, sip, account, d=date(2026, 9, 5), amount=5000.0)
+    session.commit()
+
+    result = calc.category_trends(session, "this_month", date(2026, 9, 1), date(2026, 9, 30))
+
+    assert not any(r["category"] == "SIP" for r in result)

@@ -263,12 +263,26 @@ def category_trends(session: Session, range_: str, date_from: Optional[date_type
     Sorted by absolute rupee swing (not percentage) so a category that went
     from Rs 50 to Rs 150 (a huge 200% jump, but trivial in real money) doesn't
     outrank one that went from Rs 20,000 to Rs 24,000 (a modest 20% jump that
-    actually moved the budget)."""
+    actually moved the budget).
+
+    For Expense trends, categories with counts_as_expense=False (SIP, Savings)
+    are excluded entirely - the same distinction the Expenses KPI, essential/
+    discretionary split, and anomaly detection already draw. A bigger SIP
+    contribution isn't "spending moving in the wrong direction" - it doesn't
+    belong in a spending-trends comparison at all."""
     prev = _previous_range_bounds(range_, date_from)
     if not prev:
         return []
-    cur = {r["category"]: r["total"] for r in by_category(session, date_from, date_to, transaction_type=transaction_type)}
-    prv = {r["category"]: r["total"] for r in by_category(session, *prev, transaction_type=transaction_type)}
+    cur_rows = by_category(session, date_from, date_to, transaction_type=transaction_type)
+    prv_rows = by_category(session, *prev, transaction_type=transaction_type)
+    if transaction_type == "Expense":
+        real_expense_names = {
+            c.name for c in session.scalars(select(Category).where(Category.counts_as_expense.is_(True)))
+        }
+        cur_rows = [r for r in cur_rows if r["category"] in real_expense_names]
+        prv_rows = [r for r in prv_rows if r["category"] in real_expense_names]
+    cur = {r["category"]: r["total"] for r in cur_rows}
+    prv = {r["category"]: r["total"] for r in prv_rows}
     rows = []
     for name in set(cur) | set(prv):
         c, p = cur.get(name, 0.0), prv.get(name, 0.0)
