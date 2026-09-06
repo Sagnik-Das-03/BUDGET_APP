@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useRef, useState } from 'react';
-import { Plus, Trash2, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, Trash2, X } from 'lucide-react';
 import { api } from '../lib/api';
 import { fmtMoney } from '../lib/format';
 import { Button } from '@/components/ui/button';
@@ -11,6 +11,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { MultiSelectFilter } from '@/components/MultiSelectFilter';
+import { ModelBadge } from '@/components/ModelBadge';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July',
   'August', 'September', 'October', 'November', 'December'];
@@ -20,6 +21,7 @@ const SYNC_VARIANT: Record<string, 'default' | 'secondary' | 'destructive' | 'ou
 };
 
 const ANY = '__any__';
+const PAGE_SIZE = 50;
 
 let nextRowId = 1;
 interface NewRow {
@@ -54,6 +56,7 @@ export function Transactions() {
   const [showAddForm, setShowAddForm] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [newRows, setNewRows] = useState<NewRow[]>([emptyRow()]);
+  const [page, setPage] = useState(1);
 
   const categories = useQuery({ queryKey: ['categories'], queryFn: api.listCategories });
   const accounts = useQuery({ queryKey: ['accounts'], queryFn: api.listAccounts });
@@ -83,11 +86,17 @@ export function Transactions() {
     });
   }
 
+  // "Select all" only touches the current page - selections on other pages
+  // (from paging through and checking a few there too) are left alone.
   function toggleAll(checked: boolean) {
-    setSelected(checked ? new Set(transactions.data?.map((t) => t.transaction_id)) : new Set());
+    setSelected((prev) => {
+      const next = new Set(prev);
+      for (const t of pagedRows) {
+        if (checked) next.add(t.transaction_id); else next.delete(t.transaction_id);
+      }
+      return next;
+    });
   }
-
-  const allVisibleSelected = !!transactions.data?.length && transactions.data.every((t) => selected.has(t.transaction_id));
 
   const filteredTotals = useMemo(() => {
     const rows = transactions.data ?? [];
@@ -99,6 +108,11 @@ export function Transactions() {
     }
     return { count: rows.length, income, expenses, net: income - expenses };
   }, [transactions.data]);
+
+  const totalPages = Math.max(1, Math.ceil((transactions.data?.length ?? 0) / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pagedRows = (transactions.data ?? []).slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  const allVisibleSelected = !!pagedRows.length && pagedRows.every((t) => selected.has(t.transaction_id));
 
   const validRows = newRows.filter((r) => r.description.trim() && r.category && parseFloat(r.amount) > 0);
 
@@ -121,8 +135,9 @@ export function Transactions() {
     if (value.trim().length < 2) return;
     suggestTimers.current.set(rowId, setTimeout(async () => {
       try {
+        const rowDate = newRows.find((r) => r.id === rowId)?.date;
         const [{ suggestion }, { category: suggestedCategory }] = await Promise.all([
-          api.autocomplete(value),
+          api.autocomplete(value, rowDate),
           api.categorize(value),
         ]);
         if (suggestion) updateRow(rowId, { suggestion });
@@ -162,7 +177,20 @@ export function Transactions() {
       type: type || undefined, search: search || undefined,
     });
     setSelected(new Set());
+    setPage(1);
   }
+
+  function clearFilters() {
+    setYear(''); setMonth('');
+    setCategory([]); setCategoryExclude(false);
+    setAccount([]); setAccountExclude(false);
+    setType(''); setSearch('');
+    setAppliedFilters({});
+    setSelected(new Set());
+    setPage(1);
+  }
+
+  const hasActiveFilters = !!(year || month || category.length || account.length || type || search);
 
   return (
     <>
@@ -204,6 +232,11 @@ export function Transactions() {
         </Select>
         <Input type="text" placeholder="Search description…" value={search} onChange={(e) => setSearch(e.target.value)} className="w-56" />
         <Button variant="outline" size="sm" onClick={applyFilters}>Filter</Button>
+        {hasActiveFilters && (
+          <Button variant="ghost" size="sm" onClick={clearFilters}>
+            <X className="size-4" /> Clear
+          </Button>
+        )}
         <Button size="sm" onClick={() => setShowAddForm(!showAddForm)}>
           <Plus className="size-4" /> Add Transactions
         </Button>
@@ -323,6 +356,9 @@ export function Transactions() {
                 : `Save ${validRows.length} Transaction${validRows.length === 1 ? '' : 's'}`}
             </Button>
             <Button size="sm" variant="outline" onClick={() => { setShowAddForm(false); setNewRows([emptyRow()]); }}>Cancel</Button>
+            <span className="ml-auto flex items-center gap-1.5 text-xs text-muted-foreground">
+              Autocomplete <ModelBadge task="autocomplete" />
+            </span>
             {bulkCreateTxn.isError && <span className="text-sm text-destructive">{(bulkCreateTxn.error as Error).message}</span>}
           </div>
         </Card>
@@ -345,11 +381,11 @@ export function Transactions() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {!transactions.data?.length ? (
+            {!pagedRows.length ? (
               <TableRow><TableCell colSpan={9}>
                 <div className="py-8 text-center text-sm text-muted-foreground">No transactions match these filters.</div>
               </TableCell></TableRow>
-            ) : transactions.data.map((t) => (
+            ) : pagedRows.map((t) => (
               <TableRow key={t.transaction_id} data-state={selected.has(t.transaction_id) ? 'selected' : undefined}>
                 <TableCell className="pl-6">
                   <Checkbox
@@ -375,6 +411,23 @@ export function Transactions() {
           </TableBody>
         </Table>
       </Card>
+
+      {!!transactions.data?.length && (
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
+          <span>
+            Showing {(currentPage - 1) * PAGE_SIZE + 1}–{Math.min(currentPage * PAGE_SIZE, transactions.data.length)} of {transactions.data.length}
+          </span>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" disabled={currentPage <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
+              <ChevronLeft className="size-4" /> Previous
+            </Button>
+            <span>Page {currentPage} of {totalPages}</span>
+            <Button variant="outline" size="sm" disabled={currentPage >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>
+              Next <ChevronRight className="size-4" />
+            </Button>
+          </div>
+        </div>
+      )}
     </>
   );
 }

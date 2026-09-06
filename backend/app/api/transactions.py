@@ -9,9 +9,25 @@ from app.repositories.accounts import AccountRepository
 from app.repositories.categories import CategoryRepository
 from app.repositories.transactions import TransactionRepository
 from app.schemas import BulkCreateIn, BulkDeleteIn, TransactionIn, TransactionOut, TransactionTrashOut
+from app.sync import scheduler
+from app.sync.engine import clear_sheet_rows
 from typing import List, Optional
 
 router = APIRouter(prefix="/api/transactions", tags=["transactions"])
+
+
+def _clear_synced_rows_from_sheet(transaction_ids: list[str]) -> None:
+    """Blanks these transactions' rows in Google Sheets, if sync is
+    configured - see clear_sheet_rows' docstring for why a permanent local
+    delete needs this too, not just the local DB row. Raises on failure so
+    callers can refuse the permanent delete rather than let local and Sheets
+    state silently diverge (the transaction would just come back on the next
+    sync otherwise). A no-op when sync isn't configured at all."""
+    sheets = scheduler._sheets_client()
+    if sheets is None:
+        return
+    spreadsheet_id = scheduler._resolve_spreadsheet_id(sheets)
+    clear_sheet_rows(sheets, spreadsheet_id, set(transaction_ids))
 
 
 def _to_out(txn: Transaction) -> TransactionOut:
@@ -108,7 +124,27 @@ def bulk_restore_transactions(payload: BulkDeleteIn, session: Session = Depends(
 
 @router.post("/bulk_permanent_delete")
 def bulk_permanent_delete_transactions(payload: BulkDeleteIn, session: Session = Depends(get_session)):
-    result = TransactionRepository(session).bulk_permanent_delete(payload.transaction_ids)
+    repo = TransactionRepository(session)
+    synced_ids = [
+        tid for tid in payload.transaction_ids
+        if (txn := repo.get_by_transaction_id(tid))
+        and txn.deleted_at is not None and txn.last_synced_at is not None and txn.sync_status == SyncStatus.synced
+    ]
+
+    if synced_ids:
+        try:
+            _clear_synced_rows_from_sheet(synced_ids)
+        except Exception:
+            # Couldn't confirm the Sheets rows are gone - don't hard-delete any
+            # transaction that needed that (they'd just come back next sync).
+            # Ones that never synced at all are unaffected and still go through.
+            never_synced_ids = [tid for tid in payload.transaction_ids if tid not in synced_ids]
+            result = repo.bulk_permanent_delete(never_synced_ids)
+            session.commit()
+            result["blocked"] += len(synced_ids)
+            return result
+
+    result = repo.bulk_permanent_delete(payload.transaction_ids)
     session.commit()
     return result
 
@@ -124,13 +160,32 @@ def restore_transaction(transaction_id: str, session: Session = Depends(get_sess
 
 @router.delete("/{transaction_id}/permanent")
 def permanent_delete_transaction(transaction_id: str, session: Session = Depends(get_session)):
-    result = TransactionRepository(session).permanent_delete(transaction_id)
-    if result == "not_found":
+    repo = TransactionRepository(session)
+    txn = repo.get_by_transaction_id(transaction_id)
+    if not txn:
         raise HTTPException(404, "Transaction not found")
-    if result == "not_trashed":
+    if txn.deleted_at is None:
         raise HTTPException(400, "Transaction is not in trash - delete it first")
-    if result == "blocked":
+    if txn.last_synced_at is not None and txn.sync_status != SyncStatus.synced:
         raise HTTPException(409, "This deletion hasn't synced to Google Sheets yet - wait for the next sync before permanently deleting")
+
+    # A synced transaction still has a row in the sheet - clear it too, or
+    # the next pull() would just recreate the transaction we're about to
+    # hard-delete locally (this was happening: "permanently deleted but
+    # syncing brings it back").
+    if txn.last_synced_at is not None:
+        try:
+            _clear_synced_rows_from_sheet([transaction_id])
+        except Exception as e:
+            raise HTTPException(
+                503,
+                "Could not remove the row from Google Sheets, so it was NOT deleted locally either "
+                f"(it would just reappear on the next sync): {e}",
+            ) from e
+
+    result = repo.permanent_delete(transaction_id)
+    if result != "deleted":
+        raise HTTPException(409, f"Could not permanently delete (unexpected state: {result})")
     session.commit()
     return {"ok": True}
 

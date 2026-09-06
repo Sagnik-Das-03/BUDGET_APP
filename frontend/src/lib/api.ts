@@ -1,7 +1,7 @@
 import type {
   Account, AskResponse, Budget, BudgetAlert, BudgetVsActual, Category, CategoryDrilldownNode,
   CategoryTotal, ChartPalette, ConflictRow, Highlights, ImportCommitResult, ImportPreviewResult, ImportRowIn,
-  MonthlyBreakdownRow, MonthlyRecap, SavingsGoalProgress, SyncConfig, SyncLogEntry,
+  LlmStatus, MonthlyBreakdownRow, MonthlyRecap, SavingsGoalProgress, SyncConfig, SyncLogEntry,
   SyncStatus, Totals, Transaction, TrashedTransaction, TrendForRange,
 } from './types';
 
@@ -104,8 +104,9 @@ export const api = {
     request<{ deleted: number; blocked: number; not_found: number }>('/api/transactions/bulk_permanent_delete', { method: 'POST', body: JSON.stringify({ transaction_ids }) }),
 
   // ---------- local AI features ----------
-  autocomplete: (text: string) =>
-    request<{ suggestion: string }>('/api/llm/autocomplete', { method: 'POST', body: JSON.stringify({ text }) }),
+  llmStatus: () => request<LlmStatus>('/api/llm/status'),
+  autocomplete: (text: string, date?: string) =>
+    request<{ suggestion: string }>('/api/llm/autocomplete', { method: 'POST', body: JSON.stringify({ text, date }) }),
   categorize: (description: string) =>
     request<{ category: string }>('/api/llm/categorize', { method: 'POST', body: JSON.stringify({ description }) }),
   recap: (range: string, dateBounds?: DateBounds, label?: string) =>

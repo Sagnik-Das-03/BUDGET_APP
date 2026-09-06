@@ -87,6 +87,30 @@ def pull(session: Session, sheets: GoogleSheetsService, spreadsheet_id: str,
     return {"counts": counts, "id_to_row_number": id_to_row_number}
 
 
+def clear_sheet_rows(sheets: GoogleSheetsService, spreadsheet_id: str, transaction_ids: set[str]) -> int:
+    """Blanks the sheet row(s) for the given transaction ids - used after a
+    PERMANENT local delete, since pull() otherwise has no way to know the row
+    should stay gone: it reads every row in the sheet every cycle and
+    recreates any transaction_id it finds that's missing locally (that's how
+    it notices things added outside the app). A blank row is skipped
+    outright by pull()'s "any non-empty cell" check, so this stops the
+    now-hard-deleted transaction from being resurrected on the next sync.
+    Returns how many rows were found and blanked."""
+    raw_rows = sheets.get_rows(spreadsheet_id, TRANSACTIONS_SHEET)
+    if not raw_rows:
+        return 0
+    blank_row = ["" for _ in mapping.HEADERS]
+    updates: dict[int, list[str]] = {}
+    for offset, raw in enumerate(raw_rows[1:]):
+        row_number = offset + 2  # header is row 1
+        tid = raw[0].strip() if raw and raw[0] else ""
+        if tid in transaction_ids:
+            updates[row_number] = blank_row
+    if updates:
+        sheets.update_rows(spreadsheet_id, TRANSACTIONS_SHEET, updates)
+    return len(updates)
+
+
 def push(session: Session, sheets: GoogleSheetsService, spreadsheet_id: str,
          id_to_row_number: dict[str, int]) -> dict:
     tx_repo = TransactionRepository(session)

@@ -48,6 +48,12 @@ export interface AskResponse {
   range: string;
 }
 
+export interface LlmStatus {
+  available: boolean;
+  reason: string | null;
+  models: Record<string, string>;
+}
+
 export interface Totals {
   income: number;
   expenses: number;

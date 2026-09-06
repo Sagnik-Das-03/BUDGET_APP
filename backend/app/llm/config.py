@@ -9,6 +9,13 @@ MODEL_FILES = {
     "gemma_4_e2b": "gemma-4-E2B-it-web.litertlm",
 }
 
+# Human-readable names for the UI (e.g. "which model is answering this?").
+MODEL_DISPLAY_NAMES = {
+    "qwen3_0_6b": "Qwen3 0.6B",
+    "qwen3_4b": "Qwen3 4B (int4)",
+    "gemma_4_e2b": "Gemma 4 E2B",
+}
+
 # Router config: which model handles which AI task. query_parse (chat query
 # understanding) and summarize (monthly recap) both route to the bigger 4B
 # model - in testing, the tiny 0.6B model was unreliable at multi-field

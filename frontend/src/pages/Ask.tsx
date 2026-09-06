@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { Send } from 'lucide-react';
 import { api } from '../lib/api';
 import { useElapsedSeconds } from '../lib/useElapsedSeconds';
+import { ModelBadge } from '../components/ModelBadge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
@@ -37,7 +38,10 @@ export function Ask() {
 
   return (
     <>
-      <h1 className="text-2xl font-bold tracking-tight">Ask Your Budget</h1>
+      <div className="flex items-center gap-2.5">
+        <h1 className="text-2xl font-bold tracking-tight">Ask Your Budget</h1>
+        <ModelBadge task="query_parse" />
+      </div>
       <p className="mb-5 mt-1 text-sm text-muted-foreground">
         Ask about your spending in plain English. A local AI model turns your question into a
         query over your own transactions — it doesn't do the arithmetic itself.

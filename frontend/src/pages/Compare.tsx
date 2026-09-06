@@ -310,7 +310,6 @@ export function Compare() {
           </Card>
 
           <CompareRecapCard
-            key={`${resolvedA.date_from}_${resolvedA.date_to}_${resolvedB.date_from}_${resolvedB.date_to}`}
             labelA={resolvedA.label} labelB={resolvedB.label}
             dateFromA={resolvedA.date_from} dateToA={resolvedA.date_to}
             dateFromB={resolvedB.date_from} dateToB={resolvedB.date_to}

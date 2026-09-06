@@ -7,7 +7,7 @@ from app.repositories.transactions import TransactionRepository
 from app.repositories.sync import SyncRepository
 from app.sheets import mapping
 from app.sync import engine as engine_mod
-from app.sync.engine import pull, push, run_sync_cycle
+from app.sync.engine import clear_sheet_rows, pull, push, run_sync_cycle
 
 SPREADSHEET_ID = "fake-id"
 
@@ -170,3 +170,57 @@ def test_deleting_an_already_synced_transaction_pushes_the_deletion(session, she
     row = next(r for r in data_rows if r and r[0] == txn.transaction_id)
     assert row[mapping.COL["Deleted"]] == "TRUE"
     assert tx_repo.get_by_transaction_id(txn.transaction_id).sync_status == SyncStatus.synced
+
+
+def test_permanently_deleted_transaction_is_not_resurrected_by_the_next_pull(session, sheets):
+    """Regression test: permanent_delete() only removed the local DB row: the
+    sheet still had a (Deleted=TRUE) row for that transaction_id, and pull()
+    recreates any transaction_id it finds in the sheet but not locally - so
+    the very next sync brought the "permanently deleted" transaction right
+    back. clear_sheet_rows() must blank that row too before the local
+    hard-delete, so pull() has nothing left to recreate from."""
+    cat_repo, acct_repo, tx_repo = CategoryRepository(session), AccountRepository(session), TransactionRepository(session)
+    category, account = cat_repo.get_by_name("Shopping"), acct_repo.get_or_create("Primary")
+
+    txn = tx_repo.create(date=date(2026, 9, 10), description="One-time purchase", amount=999.0,
+                          transaction_type=TransactionType.expense, category=category, account=account)
+    session.commit()
+    transaction_id = txn.transaction_id
+
+    sheets.ensure_sheet(SPREADSHEET_ID, "Transactions")
+    sheets.clear_and_write(SPREADSHEET_ID, "Transactions", [mapping.HEADERS])
+
+    # sync it onto the sheet, then delete + sync again so the sheet's row is
+    # marked Deleted=TRUE and sync_status is back to synced (the state that
+    # makes permanent_delete's "blocked" guard pass).
+    raw_rows = sheets.get_rows(SPREADSHEET_ID, "Transactions")
+    pull_result = pull(session, sheets, SPREADSHEET_ID, raw_rows)
+    session.commit()
+    push(session, sheets, SPREADSHEET_ID, pull_result["id_to_row_number"])
+    session.commit()
+
+    tx_repo.soft_delete(transaction_id)
+    session.commit()
+
+    raw_rows = sheets.get_rows(SPREADSHEET_ID, "Transactions")
+    pull_result = pull(session, sheets, SPREADSHEET_ID, raw_rows)
+    session.commit()
+    push(session, sheets, SPREADSHEET_ID, pull_result["id_to_row_number"])
+    session.commit()
+    assert tx_repo.get_by_transaction_id(transaction_id).sync_status == SyncStatus.synced
+
+    # permanent delete: clear the sheet row first (what the API now does), then hard-delete locally
+    blanked = clear_sheet_rows(sheets, SPREADSHEET_ID, {transaction_id})
+    assert blanked == 1
+    result = tx_repo.permanent_delete(transaction_id)
+    session.commit()
+    assert result == "deleted"
+    assert tx_repo.get_by_transaction_id(transaction_id) is None
+
+    # the next sync cycle must NOT bring it back
+    raw_rows = sheets.get_rows(SPREADSHEET_ID, "Transactions")
+    pull_result = pull(session, sheets, SPREADSHEET_ID, raw_rows)
+    session.commit()
+
+    assert tx_repo.get_by_transaction_id(transaction_id) is None
+    assert pull_result["counts"].get("created", 0) == 0

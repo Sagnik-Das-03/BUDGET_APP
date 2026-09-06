@@ -86,6 +86,7 @@ class BulkCreateIn(BaseModel):
 
 class AutocompleteIn(BaseModel):
     text: str = Field(min_length=1, max_length=200)
+    date: Optional[date_type] = None
 
 
 class AutocompleteOut(BaseModel):

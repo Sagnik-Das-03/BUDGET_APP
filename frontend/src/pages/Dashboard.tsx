@@ -196,7 +196,7 @@ export function Dashboard() {
       <KpiRow tiles={tiles} />
 
       <div className="mb-5">
-        <RecapCard key={categoryLabel} range={effectiveRange} dateBounds={effectiveBounds} label={categoryLabel} />
+        <RecapCard range={effectiveRange} dateBounds={effectiveBounds} label={categoryLabel} />
       </div>
 
       <div className="grid grid-cols-1 gap-5 md:grid-cols-2">

@@ -1,3 +1,4 @@
+import re
 from datetime import date as date_type
 from typing import Optional
 
@@ -7,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.api.dashboard import _resolve_range as _dashboard_resolve_range
 from app.dashboard import calculations as calc
 from app.db import get_session
+from app.llm.config import MODEL_DISPLAY_NAMES, TASK_MODEL
 from app.llm.router import llm_router
 from app.repositories.categories import CategoryRepository
 from app.repositories.transactions import TransactionRepository
@@ -16,6 +18,19 @@ from app.schemas import (
 )
 
 router = APIRouter(prefix="/api/llm", tags=["llm"])
+
+# Matches a trailing "(DD/MM/YY)"-style date this user's descriptions often
+# embed, e.g. "Zomato (28/08/26)" - a past description is a great style
+# template, but its own baked-in date is almost always stale for a NEW
+# transaction being entered today (or on whatever date is currently picked).
+_TRAILING_DATE = re.compile(r"\(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\)\s*$")
+
+
+def _refresh_trailing_date(text: str, new_date: Optional[date_type]) -> str:
+    if not new_date:
+        return text
+    return _TRAILING_DATE.sub(f"({new_date.day:02d}/{new_date.month:02d}/{new_date.strftime('%y')})", text)
+
 
 _RANGE_LABELS = {
     "this_week": "this week", "this_month": "this month", "last_month": "last month",
@@ -35,7 +50,11 @@ def _resolve_named_range(range_key: str, date_from: Optional[date_type] = None,
 
 @router.get("/status")
 def llm_status():
-    return {"available": llm_router.available, "reason": llm_router.unavailable_reason}
+    return {
+        "available": llm_router.available,
+        "reason": llm_router.unavailable_reason,
+        "models": {task: MODEL_DISPLAY_NAMES.get(model_key, model_key) for task, model_key in TASK_MODEL.items()},
+    }
 
 
 @router.post("/autocomplete", response_model=AutocompleteOut)
@@ -54,7 +73,7 @@ def autocomplete(payload: AutocompleteIn, session: Session = Depends(get_session
     # A past description sharing this prefix is a better bet than any LLM guess.
     prefix_matches = [d for d in seen if d.lower() != text.lower() and d.lower().startswith(text.lower())]
     if prefix_matches:
-        return AutocompleteOut(suggestion=prefix_matches[0])
+        return AutocompleteOut(suggestion=_refresh_trailing_date(prefix_matches[0], payload.date))
 
     if not llm_router.available or len(text) < 2:
         return AutocompleteOut(suggestion="")
@@ -77,7 +96,7 @@ def autocomplete(payload: AutocompleteIn, session: Session = Depends(get_session
     suggestion = suggestion.strip().strip('"')
     if not suggestion or suggestion.lower() == text.lower() or not suggestion.lower().startswith(text.lower()):
         return AutocompleteOut(suggestion="")
-    return AutocompleteOut(suggestion=suggestion)
+    return AutocompleteOut(suggestion=_refresh_trailing_date(suggestion, payload.date))
 
 
 @router.post("/categorize", response_model=CategorizeOut)
