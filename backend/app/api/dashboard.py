@@ -93,3 +93,10 @@ def budget_vs_actual(period_key: Optional[str] = None, session: Session = Depend
 def budget_alerts(period_key: Optional[str] = None, threshold: float = 0.9, session: Session = Depends(get_session)):
     pk = period_key or period_key_for(date_type.today())
     return calc.budget_alerts(session, pk, warning_threshold=threshold)
+
+
+@router.get("/anomalies")
+def anomalies(range: str = "this_month", date_from: Optional[date_type] = None,
+              date_to: Optional[date_type] = None, session: Session = Depends(get_session)):
+    d_from, d_to = _resolve_range(range, date_from, date_to)
+    return calc.detect_anomalies(session, d_from, d_to)

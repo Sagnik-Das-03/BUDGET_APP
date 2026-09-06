@@ -7,6 +7,7 @@ import type { RangeKey } from '../lib/types';
 import { RangeToggle } from '../components/RangeToggle';
 import { MetricsRow } from '../components/MetricsRow';
 import { AlertBanner } from '../components/AlertBanner';
+import { AnomalyBanner } from '../components/AnomalyBanner';
 import { KpiRow, type KpiTileData } from '../components/KpiRow';
 import { TrendChart } from '../components/TrendChart';
 import { CategoryChart } from '../components/CategoryChart';
@@ -76,6 +77,10 @@ export function Dashboard() {
     queryKey: ['monthlyBreakdown'], queryFn: api.monthlyBreakdown, enabled: range === 'all_time',
   });
   const alerts = useQuery({ queryKey: ['budgetAlerts'], queryFn: api.budgetAlerts });
+  const anomalies = useQuery({
+    queryKey: ['anomalies', effectiveRange, selectedYear, selectedMonth],
+    queryFn: () => api.anomalies(effectiveRange, effectiveBounds),
+  });
   // The goal is inherently monthly, so it only makes sense to compare against a
   // specific month - when one's drilled into (from This Year or All Time), compare
   // against that month instead of always defaulting to the real current month.
@@ -192,6 +197,7 @@ export function Dashboard() {
       </div>
 
       <AlertBanner alerts={alerts.data} />
+      <AnomalyBanner anomalies={anomalies.data} />
       <MetricsRow highlights={highlights.data} />
       <KpiRow tiles={tiles} />
 

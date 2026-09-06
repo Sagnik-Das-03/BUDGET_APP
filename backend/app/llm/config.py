@@ -28,6 +28,7 @@ TASK_MODEL = {
     "categorize": "qwen3_0_6b",
     "query_parse": "qwen3_4b",
     "summarize": "qwen3_4b",
+    "quick_add": "qwen3_4b",
 }
 
 # Tasks whose model gets loaded eagerly at startup (see LLMRouter.warm_up) -

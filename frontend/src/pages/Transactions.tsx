@@ -1,8 +1,10 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight, Plus, Trash2, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, Sparkles, Trash2, X } from 'lucide-react';
 import { api } from '../lib/api';
 import { fmtMoney } from '../lib/format';
+import { useLocalStorage } from '../lib/useLocalStorage';
+import type { Transaction } from '../lib/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
@@ -42,6 +44,42 @@ function emptyRow(): NewRow {
   };
 }
 
+interface ViewFilters {
+  year: string;
+  month: string;
+  category: string[];
+  categoryExclude: boolean;
+  account: string[];
+  accountExclude: boolean;
+  type: string;
+  search: string;
+}
+
+interface SavedView {
+  id: string;
+  name: string;
+  filters: ViewFilters;
+}
+
+function buildQueryParams(f: ViewFilters) {
+  return {
+    year: f.year || undefined, month: f.month || undefined,
+    category: f.category.length ? f.category : undefined, category_exclude: f.categoryExclude,
+    account: f.account.length ? f.account : undefined, account_exclude: f.accountExclude,
+    type: f.type || undefined, search: f.search || undefined,
+  };
+}
+
+function computeTotals(rows: Transaction[]) {
+  let income = 0;
+  let expenses = 0;
+  for (const t of rows) {
+    if (t.transaction_type === 'Income') income += t.amount;
+    else expenses += t.amount;
+  }
+  return { count: rows.length, income, expenses, net: income - expenses };
+}
+
 export function Transactions() {
   const queryClient = useQueryClient();
   const [year, setYear] = useState('');
@@ -57,6 +95,9 @@ export function Transactions() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [newRows, setNewRows] = useState<NewRow[]>([emptyRow()]);
   const [page, setPage] = useState(1);
+  const [quickAddText, setQuickAddText] = useState('');
+  const [savedViews, setSavedViews] = useLocalStorage<SavedView[]>('budget_tracker.savedViews', []);
+  const [compareIds, setCompareIds] = useState<Set<string>>(new Set());
 
   const categories = useQuery({ queryKey: ['categories'], queryFn: api.listCategories });
   const accounts = useQuery({ queryKey: ['accounts'], queryFn: api.listAccounts });
@@ -98,16 +139,7 @@ export function Transactions() {
     });
   }
 
-  const filteredTotals = useMemo(() => {
-    const rows = transactions.data ?? [];
-    let income = 0;
-    let expenses = 0;
-    for (const t of rows) {
-      if (t.transaction_type === 'Income') income += t.amount;
-      else expenses += t.amount;
-    }
-    return { count: rows.length, income, expenses, net: income - expenses };
-  }, [transactions.data]);
+  const filteredTotals = useMemo(() => computeTotals(transactions.data ?? []), [transactions.data]);
 
   const totalPages = Math.max(1, Math.ceil((transactions.data?.length ?? 0) / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
@@ -169,13 +201,12 @@ export function Transactions() {
     },
   });
 
+  function currentFiltersSnapshot(): ViewFilters {
+    return { year, month, category, categoryExclude, account, accountExclude, type, search };
+  }
+
   function applyFilters() {
-    setAppliedFilters({
-      year: year || undefined, month: month || undefined,
-      category: category.length ? category : undefined, category_exclude: categoryExclude,
-      account: account.length ? account : undefined, account_exclude: accountExclude,
-      type: type || undefined, search: search || undefined,
-    });
+    setAppliedFilters(buildQueryParams(currentFiltersSnapshot()));
     setSelected(new Set());
     setPage(1);
   }
@@ -192,10 +223,96 @@ export function Transactions() {
 
   const hasActiveFilters = !!(year || month || category.length || account.length || type || search);
 
+  function saveCurrentView() {
+    const name = window.prompt('Name this view:')?.trim();
+    if (!name) return;
+    setSavedViews([...savedViews, { id: crypto.randomUUID(), name, filters: currentFiltersSnapshot() }]);
+  }
+
+  function applyView(view: SavedView) {
+    setYear(view.filters.year); setMonth(view.filters.month);
+    setCategory(view.filters.category); setCategoryExclude(view.filters.categoryExclude);
+    setAccount(view.filters.account); setAccountExclude(view.filters.accountExclude);
+    setType(view.filters.type); setSearch(view.filters.search);
+    setAppliedFilters(buildQueryParams(view.filters));
+    setSelected(new Set());
+    setPage(1);
+  }
+
+  function deleteView(id: string) {
+    setSavedViews(savedViews.filter((v) => v.id !== id));
+    setCompareIds((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+  }
+
+  function toggleCompare(id: string, checked: boolean) {
+    setCompareIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(id); else next.delete(id);
+      return next;
+    });
+  }
+
+  const compareViews = savedViews.filter((v) => compareIds.has(v.id));
+  const compareQueries = useQueries({
+    queries: compareViews.map((v) => ({
+      queryKey: ['savedViewTransactions', v.id, v.filters],
+      queryFn: () => api.listTransactions(buildQueryParams(v.filters)),
+      enabled: compareViews.length >= 2,
+    })),
+  });
+
+  const quickAdd = useMutation({
+    mutationFn: (text: string) => api.quickAdd(text),
+    onSuccess: (parsed) => {
+      setQuickAddText('');
+      setShowAddForm(true);
+      const filled: NewRow = {
+        id: nextRowId++, date: parsed.date, description: parsed.description, amount: String(parsed.amount),
+        transaction_type: parsed.transaction_type, category: parsed.category, account: parsed.account,
+        categoryTouched: true,
+      };
+      setNewRows((rows) => {
+        const emptyIdx = rows.findIndex((r) => !r.description.trim() && !parseFloat(r.amount));
+        if (emptyIdx >= 0) {
+          const copy = [...rows];
+          copy[emptyIdx] = filled;
+          return copy;
+        }
+        return [...rows, filled];
+      });
+    },
+  });
+
+  function runQuickAdd() {
+    const text = quickAddText.trim();
+    if (!text || quickAdd.isPending) return;
+    quickAdd.mutate(text);
+  }
+
   return (
     <>
       <h1 className="text-2xl font-bold tracking-tight">Transactions</h1>
       <p className="mb-5 mt-1 text-sm text-muted-foreground">Every transaction across every month and year, in one place.</p>
+
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <Sparkles className="size-4 shrink-0 text-primary" />
+        <Input
+          placeholder='Quick add: "Zomato 250 today"'
+          value={quickAddText}
+          onChange={(e) => setQuickAddText(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') runQuickAdd(); }}
+          className="max-w-xs"
+        />
+        <Button variant="outline" size="sm" disabled={quickAdd.isPending || !quickAddText.trim()} onClick={runQuickAdd}>
+          {quickAdd.isPending ? 'Parsing…' : 'Add'}
+        </Button>
+        <ModelBadge task="quick_add" />
+        {quickAdd.isError && <span className="text-sm text-destructive">{(quickAdd.error as Error).message}</span>}
+      </div>
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <Input type="number" placeholder="Year" value={year} onChange={(e) => setYear(e.target.value)} className="w-24" />
@@ -237,10 +354,63 @@ export function Transactions() {
             <X className="size-4" /> Clear
           </Button>
         )}
+        {hasActiveFilters && (
+          <Button variant="ghost" size="sm" onClick={saveCurrentView}>
+            Save View
+          </Button>
+        )}
         <Button size="sm" onClick={() => setShowAddForm(!showAddForm)}>
           <Plus className="size-4" /> Add Transactions
         </Button>
       </div>
+
+      {savedViews.length > 0 && (
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <span className="text-xs text-muted-foreground">Saved views (check 2+ to compare):</span>
+          {savedViews.map((v) => (
+            <div key={v.id} className="flex items-center gap-1.5 rounded-full border py-1 pl-2 pr-1 text-xs">
+              <Checkbox
+                checked={compareIds.has(v.id)}
+                onCheckedChange={(c) => toggleCompare(v.id, c === true)}
+                aria-label={`Include ${v.name} in comparison`}
+                className="size-3.5"
+              />
+              <button type="button" className="hover:underline" onClick={() => applyView(v)}>{v.name}</button>
+              <button type="button" aria-label={`Delete ${v.name}`} className="text-muted-foreground hover:text-destructive" onClick={() => deleteView(v.id)}>
+                <X className="size-3" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {compareViews.length >= 2 && (
+        <Card className="mb-4 py-0">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Metric</TableHead>
+                {compareViews.map((v) => <TableHead key={v.id} className="text-right">{v.name}</TableHead>)}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {(['count', 'income', 'expenses', 'net'] as const).map((metric) => (
+                <TableRow key={metric}>
+                  <TableCell className="capitalize">{metric}</TableCell>
+                  {compareViews.map((v, i) => {
+                    const totals = computeTotals(compareQueries[i]?.data ?? []);
+                    return (
+                      <TableCell key={v.id} className="text-right tabular-nums">
+                        {compareQueries[i]?.isLoading ? '…' : metric === 'count' ? totals.count : fmtMoney(totals[metric])}
+                      </TableCell>
+                    );
+                  })}
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </Card>
+      )}
 
       <div className="mb-4 flex flex-wrap items-center gap-x-5 gap-y-1 text-sm text-muted-foreground">
         <span>{filteredTotals.count} transaction{filteredTotals.count === 1 ? '' : 's'}</span>

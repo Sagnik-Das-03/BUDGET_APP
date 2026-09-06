@@ -1,5 +1,5 @@
 import re
-from datetime import date as date_type
+from datetime import date as date_type, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -14,7 +14,7 @@ from app.repositories.categories import CategoryRepository
 from app.repositories.transactions import TransactionRepository
 from app.schemas import (
     AskIn, AskOut, AutocompleteIn, AutocompleteOut, CategorizeIn, CategorizeOut,
-    CompareRecapIn, CompareRecapOut, RecapOut,
+    CompareRecapIn, CompareRecapOut, QuickAddIn, QuickAddOut, RecapOut,
 )
 
 router = APIRouter(prefix="/api/llm", tags=["llm"])
@@ -134,6 +134,91 @@ def categorize(payload: CategorizeIn, session: Session = Depends(get_session)):
         category = ""
     # The enum constraint should guarantee this, but never trust it blindly.
     return CategorizeOut(category=category if category in categories else "")
+
+
+_QUICK_ADD_AMOUNT = re.compile(r"(?:rs\.?|inr|₹)?\s?\d[\d,]*(?:\.\d+)?", re.IGNORECASE)
+_QUICK_ADD_DATE_WORDS = re.compile(
+    r"\b(today|yesterday|tomorrow|day before yesterday|on\s+the\s+\d{1,2}(?:st|nd|rd|th)?|"
+    r"the\s+\d{1,2}(?:st|nd|rd|th)?|\d{1,2}(?:st|nd|rd|th)?)\b", re.IGNORECASE,
+)
+_QUICK_ADD_FILLER_WORDS = re.compile(r"\b(spent|paid|got|received|for|on|of|a|an)\b", re.IGNORECASE)
+
+
+def _extract_quick_add_description(raw_text: str) -> str:
+    """Derives the description from the user's own words via plain string
+    manipulation rather than asking the model to echo it back - constrained
+    JSON decoding proved reliable for the enum/numeric fields below, but
+    testing showed it hallucinating this one free-text field outright (e.g.
+    "Zomato 250 today" came back with description "Anda") even with the
+    schema and prompt both saying to copy it verbatim."""
+    # Date words first: an ordinal like "2nd" would otherwise have its leading
+    # digit eaten by the amount pattern, leaving a stray "nd" behind.
+    cleaned = _QUICK_ADD_DATE_WORDS.sub(" ", raw_text)
+    cleaned = _QUICK_ADD_AMOUNT.sub(" ", cleaned)
+    cleaned = _QUICK_ADD_FILLER_WORDS.sub(" ", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" .,-")
+    return cleaned or raw_text.strip()
+
+
+@router.post("/quick_add", response_model=QuickAddOut)
+def quick_add(payload: QuickAddIn, session: Session = Depends(get_session)):
+    """Parses a one-line description like 'Zomato 250 today' or 'got salary
+    87000 yesterday' into a draft transaction for the user to review before
+    saving - never creates anything itself. days_ago (a small integer) is
+    used instead of asking the model for an absolute date, since that's a
+    much safer thing for it to get right than date arithmetic; description is
+    derived in Python (see _extract_quick_add_description), not the model."""
+    text = payload.text.strip()
+    if not text:
+        raise HTTPException(400, "Empty input")
+    if not llm_router.available:
+        raise HTTPException(503, "AI features are not available")
+
+    categories = [c.name for c in CategoryRepository(session).list()]
+    if not categories:
+        raise HTTPException(503, "No categories configured")
+
+    schema = {
+        "type": "object",
+        "properties": {
+            "amount": {"type": "number", "exclusiveMinimum": 0},
+            "transaction_type": {"type": "string", "enum": ["Income", "Expense"]},
+            "category": {"type": "string", "enum": categories},
+            "days_ago": {"type": "integer", "minimum": 0, "maximum": 365},
+        },
+        "required": ["amount", "transaction_type", "category", "days_ago"],
+        "additionalProperties": False,
+    }
+    system_message = (
+        "You extract the structured details of a single financial transaction from a short user message.\n"
+        f"Available categories: {', '.join(categories)} - pick the closest match.\n"
+        '"days_ago": how many days before today this happened - 0 for today/unspecified, 1 for yesterday, etc.\n'
+        '"transaction_type": "Income" if money was received, otherwise "Expense".'
+    )
+    prompt = f'Today: {date_type.today().isoformat()}\nUser input: "{text}"\nExtract this as a transaction.'
+    try:
+        parsed = llm_router.complete_json(
+            "quick_add", prompt, system_message=system_message, schema=schema, max_output_tokens=40,
+        )
+    except Exception as e:
+        raise HTTPException(503, f"Couldn't understand that ({e})") from e
+
+    amount = float(parsed.get("amount") or 0)
+    if amount <= 0:
+        raise HTTPException(422, "Couldn't figure out an amount from that - try including a number")
+
+    category = parsed.get("category")
+    if category not in categories:
+        category = "Other" if "Other" in categories else categories[0]
+    ttype = parsed.get("transaction_type")
+    if ttype not in ("Income", "Expense"):
+        ttype = "Expense"
+    days_ago = max(0, min(365, int(parsed.get("days_ago") or 0)))
+
+    return QuickAddOut(
+        date=date_type.today() - timedelta(days=days_ago), description=_extract_quick_add_description(text),
+        amount=round(amount, 2), transaction_type=ttype, category=category, account="Primary",
+    )
 
 
 @router.get("/recap", response_model=RecapOut)

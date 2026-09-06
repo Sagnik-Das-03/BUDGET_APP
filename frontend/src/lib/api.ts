@@ -1,7 +1,7 @@
 import type {
-  Account, AskResponse, Budget, BudgetAlert, BudgetVsActual, Category, CategoryDrilldownNode,
+  Account, Anomaly, AskResponse, Budget, BudgetAlert, BudgetVsActual, Category, CategoryDrilldownNode,
   CategoryTotal, ChartPalette, ConflictRow, Highlights, ImportCommitResult, ImportPreviewResult, ImportRowIn,
-  LlmStatus, MonthlyBreakdownRow, MonthlyRecap, SavingsGoalProgress, SyncConfig, SyncLogEntry,
+  LlmStatus, MonthlyBreakdownRow, MonthlyRecap, QuickAddResult, SavingsGoalProgress, SyncConfig, SyncLogEntry,
   SyncStatus, Totals, Transaction, TrashedTransaction, TrendForRange,
 } from './types';
 
@@ -55,6 +55,8 @@ export const api = {
   budgetVsActual: () => request<BudgetVsActual[]>('/api/dashboard/budget_vs_actual'),
   monthlyBreakdown: () => request<MonthlyBreakdownRow[]>('/api/dashboard/monthly_breakdown'),
   budgetAlerts: () => request<BudgetAlert[]>('/api/dashboard/budget_alerts'),
+  anomalies: (range: string, dateBounds?: DateBounds) =>
+    request<Anomaly[]>(`/api/dashboard/anomalies${qs({ range, ...dateBounds })}`),
 
   // ---------- savings goal ----------
   getSavingsGoal: () => request<{ period_key: string; goal_amount: number | null }>('/api/savings_goal'),
@@ -117,6 +119,8 @@ export const api = {
   }) => request<{ recap: string }>('/api/llm/compare_recap', { method: 'POST', body: JSON.stringify(payload) }),
   ask: (question: string) =>
     request<AskResponse>('/api/llm/ask', { method: 'POST', body: JSON.stringify({ question }) }),
+  quickAdd: (text: string) =>
+    request<QuickAddResult>('/api/llm/quick_add', { method: 'POST', body: JSON.stringify({ text }) }),
 
   // ---------- appearance ----------
   getPalette: () => request<ChartPalette>('/api/appearance/palette'),

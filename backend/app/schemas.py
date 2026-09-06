@@ -119,6 +119,19 @@ class CompareRecapOut(BaseModel):
     recap: str
 
 
+class QuickAddIn(BaseModel):
+    text: str = Field(min_length=1, max_length=200)
+
+
+class QuickAddOut(BaseModel):
+    date: date_type
+    description: str
+    amount: float
+    transaction_type: str
+    category: str
+    account: str
+
+
 class AskIn(BaseModel):
     question: str = Field(min_length=1, max_length=300)
 

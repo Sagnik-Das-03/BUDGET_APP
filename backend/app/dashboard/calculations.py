@@ -291,6 +291,50 @@ def budget_alerts(session: Session, period_key: str, warning_threshold: float = 
     return alerts
 
 
+def detect_anomalies(session: Session, date_from: Optional[date_type], date_to: Optional[date_type],
+                      min_multiple: float = 2.0, min_absolute_gap: float = 100.0,
+                      min_history: int = 3, limit: int = 5) -> list[dict]:
+    """Flags individual expense transactions in [date_from, date_to] that are
+    unusually large relative to that category's OWN historical average
+    (computed only from transactions strictly before date_from, so a category
+    can't inflate its own baseline by including the very spike being
+    flagged). Deliberately a plain statistical heuristic, not a model call -
+    this is meant to render passively on every Dashboard load, and a local
+    LLM call is far too slow (seconds to a minute) for that. A category needs
+    at least min_history prior transactions before it gets a baseline at
+    all, so a category with one or two data points can't flag everything in
+    it as "unusual" relative to itself."""
+    history_stmt = select(Transaction).where(
+        Transaction.deleted_at.is_(None), Transaction.transaction_type == TransactionType.expense,
+    )
+    if date_from:
+        history_stmt = history_stmt.where(Transaction.date < date_from)
+    amounts_by_category: dict[str, list[float]] = {}
+    for t in session.scalars(history_stmt):
+        amounts_by_category.setdefault(t.category.name, []).append(t.amount)
+    baselines = {
+        name: sum(amounts) / len(amounts)
+        for name, amounts in amounts_by_category.items() if len(amounts) >= min_history
+    }
+
+    anomalies = []
+    for t in session.scalars(_base_query(date_from, date_to)):
+        if t.transaction_type != TransactionType.expense:
+            continue
+        baseline = baselines.get(t.category.name)
+        if not baseline or baseline <= 0:
+            continue
+        multiple = t.amount / baseline
+        if multiple >= min_multiple and (t.amount - baseline) >= min_absolute_gap:
+            anomalies.append({
+                "transaction_id": t.transaction_id, "date": t.date.isoformat(), "description": t.description,
+                "category": t.category.name, "amount": round(t.amount, 2),
+                "category_avg": round(baseline, 2), "multiple": round(multiple, 2),
+            })
+    anomalies.sort(key=lambda a: -a["multiple"])
+    return anomalies[:limit]
+
+
 def period_start(period_key: str) -> date_type:
     year, month = period_key.split("-")
     return date_type(int(year), int(month), 1)

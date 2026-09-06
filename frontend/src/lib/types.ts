@@ -54,6 +54,25 @@ export interface LlmStatus {
   models: Record<string, string>;
 }
 
+export interface QuickAddResult {
+  date: string;
+  description: string;
+  amount: number;
+  transaction_type: string;
+  category: string;
+  account: string;
+}
+
+export interface Anomaly {
+  transaction_id: string;
+  date: string;
+  description: string;
+  category: string;
+  amount: number;
+  category_avg: number;
+  multiple: number;
+}
+
 export interface Totals {
   income: number;
   expenses: number;
