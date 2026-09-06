@@ -18,6 +18,43 @@ rationale - the short version:
   serves the frontend's built output directly, so it's still one process, one
   port (`http://127.0.0.1:8000`) day to day.
 
+## Architecture
+
+```mermaid
+flowchart LR
+    subgraph Browser
+        FE["React + Vite SPA"]
+    end
+
+    subgraph Backend["FastAPI backend — one process, :8000"]
+        API["REST/JSON API<br/>(app/api/*)"]
+        CALC["dashboard/calculations.py<br/>every number shown anywhere"]
+        LLMR["LLM router<br/>(app/llm)"]
+        SYNC["sync engine + scheduler<br/>(app/sync)"]
+    end
+
+    DB[("SQLite<br/>source of truth")]
+    SHEETS[("Google Sheets<br/>human-editable mirror")]
+    MODELS[["Local models<br/>Qwen3 0.6B / 4B-int4<br/>via LiteRT-LM"]]
+
+    FE <-->|HTTP JSON| API
+    API --> CALC
+    API --> LLMR
+    API <--> DB
+    CALC --> DB
+    LLMR --> MODELS
+    SYNC <-->|two-way, ID-based| SHEETS
+    SYNC <--> DB
+```
+
+Every write lands in SQLite first, through the API; the sync engine runs on a
+background schedule (and on-demand via "Sync Now") to reconcile SQLite with
+Sheets in both directions. The LLM router loads each local model once and
+routes each AI feature (autocomplete, categorize, quick-add, the Dashboard's
+AI-generated explanation, anomaly detection's summary, "ask your budget") to
+whichever model is configured for it - a small model for per-keystroke tasks,
+a larger one for anything that can afford to be slower.
+
 ## First-time setup
 
 1. Double-click `run.bat` (repo root). It builds the frontend (`npm install` +

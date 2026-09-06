@@ -18,6 +18,14 @@ from typing import Optional
 # a direct label next to its swatch). "Other" is deliberately excluded from that
 # set and kept as neutral muted ink, same precedent as the chart palette's "goal"
 # color - a catch-all bucket doesn't need to compete for hue distinctiveness.
+#
+# Travel (#16A34A, a true green ~142° hue) was added later for flight/train/
+# intercity-bus bookings, split out of Transport (kept for everyday local
+# transport - autos, cabs) - see scripts/reclassify_travel.py for the one-off
+# move of existing transactions. It sits in the widest open hue gap in the
+# original 11 (between SIP's lime ~83° and Savings' teal ~175°) but was
+# picked by hand, not re-run through validate_palette.js - eyeball it in both
+# themes and adjust via Settings if it reads too close to a neighbor.
 # (name, color, counts_as_expense)
 DEFAULT_CATEGORIES = [
     ("Income", "#3B82F6", True),
@@ -31,6 +39,7 @@ DEFAULT_CATEGORIES = [
     ("RENT", "#F43F5E", True),
     ("Transport", "#6366F1", True),
     ("Utilities", "#EA580C", True),
+    ("Travel", "#16A34A", True),
     ("Other", "#898781", True),
 ]
 
