@@ -241,7 +241,16 @@ def period_comparison(session: Session, range_: str, date_from: Optional[date_ty
     return {
         "income_delta_pct": _pct_delta(cur["income"], prv["income"]),
         "expenses_delta_pct": _pct_delta(cur["expenses"], prv["expenses"]),
+        # Net can be zero or negative (a losing week/month is a real, valid
+        # state) unlike Income/Expenses which are almost always comfortably
+        # positive - a PERCENTAGE change against a near-zero or negative
+        # baseline blows up into a meaningless number (e.g. a previous net of
+        # -Rs 1,000 swinging to +Rs 58,000 isn't a real "5,939% increase",
+        # it's a swing from a loss to a gain). net_delta_abs (a plain rupee
+        # difference) is well-defined no matter the sign of either side, so
+        # the frontend uses that instead of net_delta_pct for this one.
         "net_delta_pct": _pct_delta(cur["net"], prv["net"]),
+        "net_delta_abs": round(cur["net"] - prv["net"], 2),
         "previous_range": {"date_from": prev[0].isoformat(), "date_to": prev[1].isoformat()},
     }
 

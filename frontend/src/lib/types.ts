@@ -112,6 +112,7 @@ export interface Highlights {
     income_delta_pct: number | null;
     expenses_delta_pct: number | null;
     net_delta_pct: number | null;
+    net_delta_abs: number;
     previous_range: { date_from: string; date_to: string };
   } | null;
 }

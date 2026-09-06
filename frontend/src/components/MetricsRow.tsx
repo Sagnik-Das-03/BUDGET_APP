@@ -1,6 +1,6 @@
 import { CalendarDays, Receipt, TrendingDown, TrendingUp, Trophy } from 'lucide-react';
 import type { Highlights } from '../lib/types';
-import { fmtMoney } from '../lib/format';
+import { fmtMoney, fmtMoneySigned } from '../lib/format';
 import { Card, CardContent } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 
@@ -30,7 +30,13 @@ function MetricChip({
 
 export function MetricsRow({ highlights }: { highlights: Highlights | undefined }) {
   const comparison = highlights?.comparison;
-  const delta = comparison?.net_delta_pct;
+  // A rupee difference, not a percentage: Net can be zero or negative (a
+  // losing week is a valid state), so a PERCENTAGE change against a
+  // near-zero or negative baseline blows up into a meaningless number (a
+  // previous net of -Rs 1,000 swinging to +Rs 58,000 isn't a "5,939%
+  // increase" - it's a swing from a loss to a gain). The rupee delta reads
+  // sensibly no matter the sign of either side.
+  const delta = comparison?.net_delta_abs;
 
   return (
     <div className="mb-5 flex flex-wrap gap-3">
@@ -57,9 +63,9 @@ export function MetricsRow({ highlights }: { highlights: Highlights | undefined 
         icon={delta !== null && delta !== undefined && delta < 0 ? <TrendingDown className="size-4" /> : <TrendingUp className="size-4" />}
         label="vs Previous Period"
         value={
-          !comparison ? '—' : delta === null || delta === undefined ? 'n/a' : (
+          !comparison || delta === undefined ? '—' : (
             <span className={cn(delta >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-destructive')}>
-              {delta >= 0 ? '▲' : '▼'} {Math.abs(delta * 100).toFixed(1)}% net
+              {delta >= 0 ? '▲' : '▼'} {fmtMoneySigned(delta)} net
             </span>
           )
         }
