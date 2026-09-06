@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { RotateCcw, Trash2 } from 'lucide-react';
 import { api } from '../lib/api';
 import { fmtMoney } from '../lib/format';
+import { useConfirmDialog } from '../lib/useConfirmDialog';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -12,6 +13,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 export function Trash() {
   const queryClient = useQueryClient();
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const { confirm, dialog: confirmDialog } = useConfirmDialog();
 
   const trash = useQuery({ queryKey: ['trash'], queryFn: api.listTrash });
 
@@ -87,8 +89,8 @@ export function Trash() {
             variant="destructive"
             size="sm"
             disabled={bulkPermanentDelete.isPending}
-            onClick={() => {
-              if (confirm(`Permanently delete ${selected.size} transaction${selected.size === 1 ? '' : 's'}? This cannot be undone.`)) {
+            onClick={async () => {
+              if (await confirm(`Permanently delete ${selected.size} transaction${selected.size === 1 ? '' : 's'}? This cannot be undone.`)) {
                 bulkPermanentDelete.mutate(Array.from(selected));
               }
             }}
@@ -151,8 +153,8 @@ export function Trash() {
                     size="sm"
                     disabled={!t.can_permanently_delete}
                     title={t.can_permanently_delete ? undefined : "Deletion hasn't synced to Google Sheets yet"}
-                    onClick={() => {
-                      if (confirm('Permanently delete this transaction? This cannot be undone.')) {
+                    onClick={async () => {
+                      if (await confirm('Permanently delete this transaction? This cannot be undone.')) {
                         permanentDelete.mutate(t.transaction_id);
                       }
                     }}
@@ -165,6 +167,8 @@ export function Trash() {
           </TableBody>
         </Table>
       </Card>
+
+      {confirmDialog}
     </>
   );
 }

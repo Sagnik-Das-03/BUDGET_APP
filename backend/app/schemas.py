@@ -101,8 +101,23 @@ class CategorizeOut(BaseModel):
     category: str
 
 
-class RecapOut(BaseModel):
-    recap: str
+class SuggestViewNameIn(BaseModel):
+    category: list[str] = []
+    category_exclude: bool = False
+    account: list[str] = []
+    account_exclude: bool = False
+    type: Optional[str] = None
+    search: Optional[str] = None
+    year: Optional[str] = None
+    month: Optional[str] = None
+
+
+class SuggestViewNameOut(BaseModel):
+    name: str
+
+
+class InsightOut(BaseModel):
+    insight: str
     range: str
 
 

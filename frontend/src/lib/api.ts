@@ -1,8 +1,8 @@
 import type {
-  Account, Anomaly, AskResponse, Budget, BudgetAlert, BudgetVsActual, Category, CategoryDrilldownNode,
-  CategoryTotal, ChartPalette, ConflictRow, Highlights, ImportCommitResult, ImportPreviewResult, ImportRowIn,
-  LlmStatus, MonthlyBreakdownRow, MonthlyRecap, QuickAddResult, SavingsGoalProgress, SyncConfig, SyncLogEntry,
-  SyncStatus, Totals, Transaction, TrashedTransaction, TrendForRange,
+  Account, AskResponse, Budget, BudgetAlert, BudgetVsActual, Category, CategoryDrilldownNode,
+  CategoryTotal, ChartPalette, ConflictRow, Forecast, Highlights, ImportCommitResult, ImportPreviewResult, ImportRowIn,
+  Insight, LlmStatus, MonthlyBreakdownRow, QuickAddResult, SavingsGoalProgress, SyncConfig, SyncLogEntry,
+  SyncStatus, Totals, Transaction, TrashedTransaction, TrendForRange, ViewFilters,
 } from './types';
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -55,8 +55,7 @@ export const api = {
   budgetVsActual: () => request<BudgetVsActual[]>('/api/dashboard/budget_vs_actual'),
   monthlyBreakdown: () => request<MonthlyBreakdownRow[]>('/api/dashboard/monthly_breakdown'),
   budgetAlerts: () => request<BudgetAlert[]>('/api/dashboard/budget_alerts'),
-  anomalies: (range: string, dateBounds?: DateBounds) =>
-    request<Anomaly[]>(`/api/dashboard/anomalies${qs({ range, ...dateBounds })}`),
+  forecast: (periodKey?: string) => request<Forecast>(`/api/dashboard/forecast${qs({ period_key: periodKey })}`),
 
   // ---------- savings goal ----------
   getSavingsGoal: () => request<{ period_key: string; goal_amount: number | null }>('/api/savings_goal'),
@@ -88,6 +87,8 @@ export const api = {
     request<Transaction[]>(`/api/transactions${qs(filters)}`),
   createTransaction: (payload: Record<string, unknown>) =>
     request<Transaction>('/api/transactions', { method: 'POST', body: JSON.stringify(payload) }),
+  updateTransaction: (id: string, payload: Record<string, unknown>) =>
+    request<Transaction>(`/api/transactions/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
   bulkCreateTransactions: (transactions: Record<string, unknown>[]) =>
     request<Transaction[]>('/api/transactions/bulk', { method: 'POST', body: JSON.stringify({ transactions }) }),
   deleteTransaction: (id: string) => request(`/api/transactions/${id}`, { method: 'DELETE' }),
@@ -111,8 +112,18 @@ export const api = {
     request<{ suggestion: string }>('/api/llm/autocomplete', { method: 'POST', body: JSON.stringify({ text, date }) }),
   categorize: (description: string) =>
     request<{ category: string }>('/api/llm/categorize', { method: 'POST', body: JSON.stringify({ description }) }),
-  recap: (range: string, dateBounds?: DateBounds, label?: string) =>
-    request<MonthlyRecap>(`/api/llm/recap${qs({ range, label, ...dateBounds })}`),
+  suggestViewName: (filters: ViewFilters) =>
+    request<{ name: string }>('/api/llm/suggest_view_name', {
+      method: 'POST',
+      body: JSON.stringify({
+        category: filters.category, category_exclude: filters.categoryExclude,
+        account: filters.account, account_exclude: filters.accountExclude,
+        type: filters.type || undefined, search: filters.search || undefined,
+        year: filters.year || undefined, month: filters.month || undefined,
+      }),
+    }),
+  insight: (range: string, dateBounds?: DateBounds, label?: string) =>
+    request<Insight>(`/api/llm/insight${qs({ range, label, ...dateBounds })}`),
   compareRecap: (payload: {
     label_a: string; label_b: string; date_from_a: string; date_to_a: string;
     date_from_b: string; date_to_b: string;

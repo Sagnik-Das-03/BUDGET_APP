@@ -14,7 +14,8 @@ from app.repositories.categories import CategoryRepository
 from app.repositories.transactions import TransactionRepository
 from app.schemas import (
     AskIn, AskOut, AutocompleteIn, AutocompleteOut, CategorizeIn, CategorizeOut,
-    CompareRecapIn, CompareRecapOut, QuickAddIn, QuickAddOut, RecapOut,
+    CompareRecapIn, CompareRecapOut, InsightOut, QuickAddIn, QuickAddOut,
+    SuggestViewNameIn, SuggestViewNameOut,
 )
 
 router = APIRouter(prefix="/api/llm", tags=["llm"])
@@ -136,6 +137,79 @@ def categorize(payload: CategorizeIn, session: Session = Depends(get_session)):
     return CategorizeOut(category=category if category in categories else "")
 
 
+_MONTH_NAMES = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+]
+
+_SUGGEST_VIEW_NAME_SYSTEM = (
+    "You write a short, natural title (2-4 words, Title Case, no punctuation) for a saved "
+    "transaction filter in a personal budget tracker app. Describe what the filter shows in "
+    "plain language - do not just restate the field labels verbatim.\n\n"
+    "Examples:\n"
+    "Filter: Categories: Food-Order\n"
+    "Title: Food Orders\n\n"
+    "Filter: Excludes categories: Food-Order, Quick-Commerce; Type: Expense\n"
+    "Title: Other Expenses\n\n"
+    "Filter: Description contains: Zomato\n"
+    "Title: Zomato Purchases\n\n"
+    "Filter: Year: 2026; Month: September\n"
+    "Title: September 2026\n\n"
+    "Filter: Type: Income\n"
+    "Title: All Income"
+)
+
+
+def _describe_view_filters(payload: SuggestViewNameIn) -> list[str]:
+    parts = []
+    if payload.category:
+        label = "Excludes categories" if payload.category_exclude else "Categories"
+        parts.append(f"{label}: {', '.join(payload.category)}")
+    if payload.account:
+        label = "Excludes accounts" if payload.account_exclude else "Accounts"
+        parts.append(f"{label}: {', '.join(payload.account)}")
+    if payload.type:
+        parts.append(f"Type: {payload.type}")
+    if payload.search:
+        parts.append(f"Description contains: {payload.search}")
+    if payload.year:
+        parts.append(f"Year: {payload.year}")
+    if payload.month:
+        try:
+            parts.append(f"Month: {_MONTH_NAMES[int(payload.month) - 1]}")
+        except (ValueError, IndexError):
+            parts.append(f"Month: {payload.month}")
+    return parts
+
+
+@router.post("/suggest_view_name", response_model=SuggestViewNameOut)
+def suggest_view_name(payload: SuggestViewNameIn):
+    if not llm_router.available:
+        return SuggestViewNameOut(name="")
+
+    parts = _describe_view_filters(payload)
+    if not parts:
+        return SuggestViewNameOut(name="")
+
+    prompt = f"Filter: {'; '.join(parts)}\nTitle:"
+    try:
+        name = llm_router.complete(
+            "suggest_view_name", prompt, system_message=_SUGGEST_VIEW_NAME_SYSTEM, max_output_tokens=16,
+        )
+    except Exception:
+        return SuggestViewNameOut(name="")
+
+    # The model sometimes rambles past the title (an explanation, a second
+    # example) instead of stopping - keep only the first line, and drop a
+    # "Title:" prefix it occasionally echoes back from the prompt.
+    name = name.strip().split("\n")[0]
+    name = re.sub(r"^title:\s*", "", name, flags=re.IGNORECASE).strip().strip("\"'.,").strip()
+    words = name.split()
+    if len(words) > 6:
+        name = " ".join(words[:6])
+    return SuggestViewNameOut(name=name[:60])
+
+
 _QUICK_ADD_AMOUNT = re.compile(r"(?:rs\.?|inr|₹)?\s?\d[\d,]*(?:\.\d+)?", re.IGNORECASE)
 _QUICK_ADD_DATE_WORDS = re.compile(
     r"\b(today|yesterday|tomorrow|day before yesterday|on\s+the\s+\d{1,2}(?:st|nd|rd|th)?|"
@@ -215,16 +289,26 @@ def quick_add(payload: QuickAddIn, session: Session = Depends(get_session)):
         ttype = "Expense"
     days_ago = max(0, min(365, int(parsed.get("days_ago") or 0)))
 
+    txn_date = date_type.today() - timedelta(days=days_ago)
+    # Matches this user's own existing naming convention (e.g. "Zomato (28/08/26)").
+    description = f"{_extract_quick_add_description(text)} ({txn_date.strftime('%d/%m/%y')})"
+
     return QuickAddOut(
-        date=date_type.today() - timedelta(days=days_ago), description=_extract_quick_add_description(text),
+        date=txn_date, description=description,
         amount=round(amount, 2), transaction_type=ttype, category=category, account="Primary",
     )
 
 
-@router.get("/recap", response_model=RecapOut)
-def recap(range: str = "this_month", date_from: Optional[date_type] = None, date_to: Optional[date_type] = None,
-          label: Optional[str] = None, session: Session = Depends(get_session)):
-    """Recap for whichever range/period the caller is currently looking at -
+@router.get("/insight", response_model=InsightOut)
+def insight(range: str = "this_month", date_from: Optional[date_type] = None, date_to: Optional[date_type] = None,
+            label: Optional[str] = None, session: Session = Depends(get_session)):
+    """A single detailed narrative for whichever range/period the caller is
+    currently looking at, replacing what used to be two separate features (a
+    short recap + a one-line anomaly summary) with one longer explanation
+    that covers both: the overall income/spending/savings picture AND a
+    call-out of anything unusual detected in the period (see
+    calc.detect_anomalies), including a guess at whether an unusual
+    transaction is a real spending spike or just a miscategorized one-off.
     range is one of _RANGE_LABELS' keys, or "custom" with date_from/date_to
     (e.g. a drilled-into month on the Dashboard). `label` is an optional
     human-readable description of a custom range for the prompt (falls back
@@ -235,12 +319,17 @@ def recap(range: str = "this_month", date_from: Optional[date_type] = None, date
     d_from, d_to = _resolve_named_range(range, date_from, date_to)
     totals = calc.totals(session, d_from, d_to)
     top_categories = calc.by_category(session, d_from, d_to, transaction_type="Expense")[:8]
+    anomalies = calc.detect_anomalies(session, d_from, d_to)
 
     if not top_categories and not totals["income"]:
-        return RecapOut(recap="Not enough data yet to generate a recap for this period.", range=range)
+        return InsightOut(insight="Not enough data yet to generate an explanation for this period.", range=range)
 
     period_desc = label or _RANGE_LABELS.get(range) or (f"{d_from} to {d_to}" if d_from and d_to else "all time")
     category_lines = "\n".join(f"- {c['category']}: Rs {c['total']:,.0f}" for c in top_categories) or "- (none)"
+    anomaly_lines = "\n".join(
+        f"- {a['description']}: Rs {a['amount']:,.0f} ({a['multiple']:.1f}x the usual Rs {a['category_avg']:,.0f} for {a['category']})"
+        for a in anomalies
+    ) or "- (nothing unusual flagged)"
     prompt = (
         f"Period: {period_desc}\n"
         f"Income: Rs {totals['income']:,.0f}\n"
@@ -248,20 +337,32 @@ def recap(range: str = "this_month", date_from: Optional[date_type] = None, date
         f"Net savings: Rs {totals['net']:,.0f}\n"
         f"Savings rate: {totals['savings_rate'] * 100:.1f}%\n"
         f"Top expense categories:\n{category_lines}\n\n"
-        "Write a short, friendly 3-4 sentence recap of this period's finances for the user. "
-        "Mention anything notable (a dominant category, a good or concerning savings rate). "
-        "Be specific with the numbers given above - do not invent new ones."
+        f"Unusual transactions flagged this period:\n{anomaly_lines}\n\n"
+        "Write a longer, detailed explanation (7-10 sentences, flowing prose - not a bulleted list) of "
+        "this period's finances for the user. Cover the overall income/spending/savings picture, which "
+        "categories dominated and why that might be, and the savings rate. Then address the unusual "
+        "transactions listed above one by one if there are any - for each, say whether it looks like a "
+        "real spending spike or just a miscategorized one-off (e.g. \"Table and Chair Bought\" filed "
+        "under Utilities is furniture, not a utility bill), or whether an extreme multiple (over 20x) "
+        "just means that category's history is too thin to be a fair baseline. If nothing unusual was "
+        "flagged, say so briefly instead of inventing something. Be specific with the numbers given "
+        "above - do not invent new ones."
     )
     try:
-        recap_text = llm_router.complete(
+        insight_text = llm_router.complete(
             "summarize", prompt,
-            system_message="You are a friendly personal-finance assistant writing a short spending recap.",
-            max_output_tokens=220,
+            system_message=(
+                "You are a friendly personal-finance assistant writing a detailed, narrative explanation "
+                "of a spending period - thorough rather than terse."
+            ),
+            max_output_tokens=450,
         )
     except Exception as e:
-        raise HTTPException(503, f"Failed to generate recap: {e}") from e
+        raise HTTPException(503, f"Failed to generate explanation: {e}") from e
 
-    return RecapOut(recap=recap_text or "Not enough data yet to generate a recap for this period.", range=range)
+    return InsightOut(
+        insight=insight_text or "Not enough data yet to generate an explanation for this period.", range=range,
+    )
 
 
 @router.post("/compare_recap", response_model=CompareRecapOut)

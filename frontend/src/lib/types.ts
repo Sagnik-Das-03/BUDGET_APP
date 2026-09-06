@@ -34,8 +34,8 @@ export interface TrashedTransaction extends Transaction {
   can_permanently_delete: boolean;
 }
 
-export interface MonthlyRecap {
-  recap: string;
+export interface Insight {
+  insight: string;
   range: string;
 }
 
@@ -54,6 +54,17 @@ export interface LlmStatus {
   models: Record<string, string>;
 }
 
+export interface ViewFilters {
+  year: string;
+  month: string;
+  category: string[];
+  categoryExclude: boolean;
+  account: string[];
+  accountExclude: boolean;
+  type: string;
+  search: string;
+}
+
 export interface QuickAddResult {
   date: string;
   description: string;
@@ -61,16 +72,6 @@ export interface QuickAddResult {
   transaction_type: string;
   category: string;
   account: string;
-}
-
-export interface Anomaly {
-  transaction_id: string;
-  date: string;
-  description: string;
-  category: string;
-  amount: number;
-  category_avg: number;
-  multiple: number;
 }
 
 export interface Totals {
@@ -149,6 +150,30 @@ export interface Budget {
   category: string;
   period_key: string | null;
   goal_amount: number;
+}
+
+export interface CategoryPace {
+  category: string;
+  goal: number;
+  actual: number;
+  projected: number;
+  pct: number;
+  status: 'on_track' | 'watch' | 'over';
+}
+
+export interface Forecast {
+  period_key: string;
+  is_current: boolean;
+  days_elapsed: number;
+  days_in_period: number;
+  income_so_far: number;
+  expenses_so_far: number;
+  net_so_far: number;
+  projected_income: number;
+  projected_expenses: number;
+  projected_net: number;
+  projected_savings_rate: number;
+  category_pace: CategoryPace[];
 }
 
 export interface SavingsGoalProgress {

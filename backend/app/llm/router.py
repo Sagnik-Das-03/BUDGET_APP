@@ -104,7 +104,11 @@ class LLMRouter:
         for block in response.get("content", []):
             if isinstance(block, dict) and block.get("type") == "text":
                 text = block.get("text") or ""
-                return _THINK_BLOCK.sub("", text).strip()
+                text = _THINK_BLOCK.sub("", text).strip()
+                # U+FFFD shows up when the native decoder's output was cut
+                # mid multi-byte UTF-8 sequence (e.g. an em dash split across
+                # a token boundary) - never surface that mangled glyph to a user.
+                return text.replace("�", "-")
         return ""
 
     def complete(

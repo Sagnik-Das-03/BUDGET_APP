@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { ChevronDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -17,14 +18,25 @@ interface MultiSelectFilterProps {
   onSelectedChange: (values: string[]) => void;
   exclude: boolean;
   onExcludeChange: (exclude: boolean) => void;
+  /** Called (in addition to closing the popover) when "Apply" is clicked - lets the
+   * caller re-run its filter query immediately instead of waiting for a separate,
+   * page-level "Filter" button. */
+  onApply?: () => void;
   className?: string;
 }
 
 export function MultiSelectFilter({
-  label, options, selected, onSelectedChange, exclude, onExcludeChange, className,
+  label, options, selected, onSelectedChange, exclude, onExcludeChange, onApply, className,
 }: MultiSelectFilterProps) {
+  const [open, setOpen] = useState(false);
+
   function toggle(value: string, checked: boolean) {
     onSelectedChange(checked ? [...selected, value] : selected.filter((v) => v !== value));
+  }
+
+  function applyAndClose() {
+    onApply?.();
+    setOpen(false);
   }
 
   const triggerLabel = selected.length === 0
@@ -32,7 +44,7 @@ export function MultiSelectFilter({
     : `${label} ${exclude ? 'excl. ' : ''}(${selected.length})`;
 
   return (
-    <Popover>
+    <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <Button variant="outline" size="sm" className={className}>
           {triggerLabel}
@@ -59,11 +71,16 @@ export function MultiSelectFilter({
             </label>
           ))}
         </div>
-        {selected.length > 0 && (
-          <Button variant="ghost" size="sm" className="mt-2 h-7 w-full text-xs" onClick={() => onSelectedChange([])}>
-            Clear
+        <div className="mt-2 flex gap-2">
+          {selected.length > 0 && (
+            <Button variant="ghost" size="sm" className="h-7 flex-1 text-xs" onClick={() => onSelectedChange([])}>
+              Clear
+            </Button>
+          )}
+          <Button size="sm" className="h-7 flex-1 text-xs" onClick={applyAndClose}>
+            Apply
           </Button>
-        )}
+        </div>
       </PopoverContent>
     </Popover>
   );

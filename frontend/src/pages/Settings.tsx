@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { Trash2, X } from 'lucide-react';
 import { api } from '../lib/api';
 import { fmtMoney } from '../lib/format';
+import { useConfirmDialog } from '../lib/useConfirmDialog';
 import type { ChartPalette } from '../lib/types';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -14,6 +15,7 @@ import { ColorSwatchInput } from '@/components/ColorSwatchInput';
 
 export function Settings() {
   const queryClient = useQueryClient();
+  const { confirm, dialog: confirmDialog } = useConfirmDialog();
   const config = useQuery({ queryKey: ['syncConfig'], queryFn: api.syncConfig });
   const savingsGoal = useQuery({ queryKey: ['savingsGoal'], queryFn: api.getSavingsGoal });
   const budgets = useQuery({ queryKey: ['budgets'], queryFn: api.listBudgets });
@@ -214,8 +216,8 @@ export function Settings() {
                 {c.name}
                 <button
                   className="ml-0.5 text-muted-foreground hover:text-destructive"
-                  onClick={() => {
-                    if (confirm("Deactivate this category? Historical transactions keep it, but it won't be selectable for new ones.")) {
+                  onClick={async () => {
+                    if (await confirm("Deactivate this category? Historical transactions keep it, but it won't be selectable for new ones.")) {
                       deactivateCategory.mutate(c.id);
                     }
                   }}
@@ -269,7 +271,7 @@ export function Settings() {
                 {a.name}
                 <button
                   className="ml-0.5 text-muted-foreground hover:text-destructive"
-                  onClick={() => { if (confirm('Deactivate this account?')) deactivateAccount.mutate(a.id); }}
+                  onClick={async () => { if (await confirm('Deactivate this account?')) deactivateAccount.mutate(a.id); }}
                 >
                   <X className="size-3" />
                 </button>
@@ -296,9 +298,9 @@ export function Settings() {
             variant="destructive"
             size="sm"
             disabled={deletePending.isPending}
-            onClick={() => {
-              if (confirm(
-                'Delete ALL pending / failed-sync transactions? This cannot be undone from the UI.\n\n' +
+            onClick={async () => {
+              if (await confirm(
+                'Delete ALL pending / failed-sync transactions? This cannot be undone from the UI. ' +
                 'Transactions already synced to Google Sheets are not affected.',
               )) {
                 setPendingDeleteResult(null);
@@ -319,6 +321,8 @@ export function Settings() {
           )}
         </CardContent>
       </Card>
+
+      {confirmDialog}
     </div>
   );
 }

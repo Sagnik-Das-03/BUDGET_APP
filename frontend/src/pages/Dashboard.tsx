@@ -7,12 +7,12 @@ import type { RangeKey } from '../lib/types';
 import { RangeToggle } from '../components/RangeToggle';
 import { MetricsRow } from '../components/MetricsRow';
 import { AlertBanner } from '../components/AlertBanner';
-import { AnomalyBanner } from '../components/AnomalyBanner';
+import { ForecastCard } from '../components/ForecastCard';
 import { KpiRow, type KpiTileData } from '../components/KpiRow';
 import { TrendChart } from '../components/TrendChart';
 import { CategoryChart } from '../components/CategoryChart';
 import { BudgetChart } from '../components/BudgetChart';
-import { RecapCard } from '../components/RecapCard';
+import { InsightCard } from '../components/InsightCard';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 const RANGE_LABEL: Record<RangeKey, string> = {
@@ -77,10 +77,6 @@ export function Dashboard() {
     queryKey: ['monthlyBreakdown'], queryFn: api.monthlyBreakdown, enabled: range === 'all_time',
   });
   const alerts = useQuery({ queryKey: ['budgetAlerts'], queryFn: api.budgetAlerts });
-  const anomalies = useQuery({
-    queryKey: ['anomalies', effectiveRange, selectedYear, selectedMonth],
-    queryFn: () => api.anomalies(effectiveRange, effectiveBounds),
-  });
   // The goal is inherently monthly, so it only makes sense to compare against a
   // specific month - when one's drilled into (from This Year or All Time), compare
   // against that month instead of always defaulting to the real current month.
@@ -119,21 +115,38 @@ export function Dashboard() {
   }, [categoryTree.data]);
 
   const tiles: KpiTileData[] = [
-    { id: 'income', label: 'Income', value: fmtMoney(s?.income) },
-    { id: 'expenses', label: 'Expenses', value: fmtMoney(s?.expenses) },
-    { id: 'sip', label: 'SIP', value: fmtMoney(s?.sip) },
-    { id: 'cash-savings', label: 'Cash Savings', value: fmtMoney(s?.cash_savings) },
+    {
+      id: 'income', label: 'Income', value: fmtMoney(s?.income),
+      description: 'Total money received this period, across all accounts.',
+    },
+    {
+      id: 'expenses', label: 'Expenses', value: fmtMoney(s?.expenses),
+      description: 'True consumption only this period. SIP and Cash Savings are tracked separately below since that money is still yours, not spent.',
+    },
+    {
+      id: 'sip', label: 'SIP', value: fmtMoney(s?.sip),
+      description: 'Money invested via SIP (Systematic Investment Plan) this period — counted as savings, not spending.',
+    },
+    {
+      id: 'cash-savings', label: 'Cash Savings', value: fmtMoney(s?.cash_savings),
+      description: 'Money moved into savings, or household/family transfers, this period — still yours, not counted as an expense.',
+    },
     {
       id: 'net', label: 'Net Savings', value: fmtMoney(s?.net),
+      description: 'Income minus Expenses. SIP and Cash Savings aren’t subtracted here since they’re not real spending — this is what’s actually left over this period.',
       sub: g?.goal ? {
         text: `${goalIcon} ${(g.pct! * 100).toFixed(0)}% of ${fmtMoney(g.goal)} goal (${goalPeriodKey ? monthLabel(goalPeriodKey) : 'this month'})`.trim(),
         className: goalCls,
       } : undefined,
     },
-    { id: 'rate', label: 'Savings Rate', value: fmtPct(s?.savings_rate) },
+    {
+      id: 'rate', label: 'Savings Rate', value: fmtPct(s?.savings_rate),
+      description: 'Net Savings as a share of Income — how much of what you earned this period you kept.',
+    },
     {
       id: 'budget-utilization', label: 'Budget Utilization',
       value: budgetUtilization ? fmtPct(budgetUtilization.pct) : '—',
+      description: 'Total actual spend vs. total budgeted goal, summed across every category that has a goal set.',
       sub: budgetUtilization ? {
         text: `${fmtMoney(budgetUtilization.totalActual)} of ${fmtMoney(budgetUtilization.totalGoal)} budgeted`,
         className: budgetUtilization.pct >= 1 ? 'behind' : undefined,
@@ -142,6 +155,7 @@ export function Dashboard() {
     {
       id: 'largest-expense', label: 'Largest Expense',
       value: largestExpense ? fmtMoney(largestExpense.value) : '—',
+      description: 'The single biggest transaction this period, and the category it fell under.',
       sub: largestExpense ? { text: `${largestExpense.name} · ${largestExpense.category}` } : undefined,
     },
   ];
@@ -197,12 +211,12 @@ export function Dashboard() {
       </div>
 
       <AlertBanner alerts={alerts.data} />
-      <AnomalyBanner anomalies={anomalies.data} />
+      <ForecastCard />
       <MetricsRow highlights={highlights.data} />
       <KpiRow tiles={tiles} />
 
       <div className="mb-5">
-        <RecapCard range={effectiveRange} dateBounds={effectiveBounds} label={categoryLabel} />
+        <InsightCard range={effectiveRange} dateBounds={effectiveBounds} label={categoryLabel} />
       </div>
 
       <div className="grid grid-cols-1 gap-5 md:grid-cols-2">

@@ -82,6 +82,26 @@ def test_ignores_a_small_absolute_gap_even_if_the_multiple_is_high(session):
     assert result == []
 
 
+def test_does_not_flag_sip_or_savings_even_for_a_big_contribution(session):
+    """SIP and Savings are counts_as_expense=False - money that's still yours
+    (invested or saved), not real spending - so a bigger-than-usual
+    contribution there is good news, not something to red-flag as unusual
+    overspending the way a real expense category would be."""
+    cat_repo, acct_repo, tx_repo = CategoryRepository(session), AccountRepository(session), TransactionRepository(session)
+    account = acct_repo.get_or_create("Primary")
+    sip = cat_repo.get_by_name("SIP")
+    assert sip.counts_as_expense is False
+
+    for day in range(1, 6):
+        _txn(tx_repo, sip, account, day=day, amount=567.0)
+    session.commit()
+    _txn(tx_repo, sip, account, day=10, amount=3510.0)  # a real 6.2x spike, same shape as test_flags_a_transaction...
+    session.commit()
+
+    result = calc.detect_anomalies(session, date(2026, 9, 8), date(2026, 9, 15))
+    assert result == []
+
+
 def test_baseline_excludes_transactions_from_the_window_itself(session):
     """The spike being evaluated must never count toward its own baseline -
     otherwise a big-enough spike could inflate the average enough to hide itself."""

@@ -95,8 +95,8 @@ def budget_alerts(period_key: Optional[str] = None, threshold: float = 0.9, sess
     return calc.budget_alerts(session, pk, warning_threshold=threshold)
 
 
-@router.get("/anomalies")
-def anomalies(range: str = "this_month", date_from: Optional[date_type] = None,
-              date_to: Optional[date_type] = None, session: Session = Depends(get_session)):
-    d_from, d_to = _resolve_range(range, date_from, date_to)
-    return calc.detect_anomalies(session, d_from, d_to)
+@router.get("/forecast")
+def forecast(period_key: Optional[str] = None, session: Session = Depends(get_session)):
+    return calc.forecast(session, period_key)
+
+

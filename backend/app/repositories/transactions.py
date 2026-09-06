@@ -177,9 +177,16 @@ class TransactionRepository:
         if transaction_type is not None:
             txn.transaction_type = transaction_type
         if category is not None:
-            txn.category_id = category.id
+            # Assign the relationship, not just category_id - the ORM already
+            # has txn.category loaded from get_by_transaction_id() above, and
+            # setting only the FK column leaves that cached object stale for
+            # the rest of this method, including the content_hash computed
+            # below from txn.category.name (and the response the caller
+            # serializes afterwards, both of which would silently keep
+            # showing the OLD category otherwise).
+            txn.category = category
         if account is not None:
-            txn.account_id = account.id
+            txn.account = account
         if notes is not None:
             txn.notes = notes
 

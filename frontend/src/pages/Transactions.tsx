@@ -1,10 +1,11 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight, Plus, Sparkles, Trash2, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Pencil, Plus, Sparkles, Trash2, X } from 'lucide-react';
 import { api } from '../lib/api';
 import { fmtMoney } from '../lib/format';
 import { useLocalStorage } from '../lib/useLocalStorage';
-import type { Transaction } from '../lib/types';
+import { useConfirmDialog } from '../lib/useConfirmDialog';
+import type { Transaction, ViewFilters } from '../lib/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
@@ -13,6 +14,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { MultiSelectFilter } from '@/components/MultiSelectFilter';
+import { SaveViewPopover } from '@/components/SaveViewPopover';
 import { ModelBadge } from '@/components/ModelBadge';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July',
@@ -44,15 +46,19 @@ function emptyRow(): NewRow {
   };
 }
 
-interface ViewFilters {
-  year: string;
-  month: string;
-  category: string[];
-  categoryExclude: boolean;
-  account: string[];
-  accountExclude: boolean;
-  type: string;
-  search: string;
+interface EditDraft {
+  date: string;
+  description: string;
+  amount: string;
+  transaction_type: string;
+  category: string;
+  account: string;
+}
+function draftFromTransaction(t: Transaction): EditDraft {
+  return {
+    date: t.date, description: t.description, amount: String(t.amount),
+    transaction_type: t.transaction_type, category: t.category, account: t.account,
+  };
 }
 
 interface SavedView {
@@ -82,6 +88,7 @@ function computeTotals(rows: Transaction[]) {
 
 export function Transactions() {
   const queryClient = useQueryClient();
+  const { confirm, dialog: confirmDialog } = useConfirmDialog();
   const [year, setYear] = useState('');
   const [month, setMonth] = useState('');
   const [category, setCategory] = useState<string[]>([]);
@@ -95,6 +102,8 @@ export function Transactions() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [newRows, setNewRows] = useState<NewRow[]>([emptyRow()]);
   const [page, setPage] = useState(1);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState<EditDraft | null>(null);
   const [quickAddText, setQuickAddText] = useState('');
   const [savedViews, setSavedViews] = useLocalStorage<SavedView[]>('budget_tracker.savedViews', []);
   const [compareIds, setCompareIds] = useState<Set<string>>(new Set());
@@ -118,6 +127,32 @@ export function Transactions() {
       queryClient.invalidateQueries({ queryKey: ['transactions'] });
     },
   });
+
+  const updateTxn = useMutation({
+    mutationFn: ({ id, draft }: { id: string; draft: EditDraft }) => api.updateTransaction(id, {
+      date: draft.date, description: draft.description, amount: parseFloat(draft.amount),
+      transaction_type: draft.transaction_type, category: draft.category, account: draft.account || 'Primary',
+    }),
+    onSuccess: () => {
+      setEditingId(null);
+      setEditDraft(null);
+      queryClient.invalidateQueries({ queryKey: ['transactions'] });
+    },
+  });
+
+  function startEdit(t: Transaction) {
+    setEditingId(t.transaction_id);
+    setEditDraft(draftFromTransaction(t));
+  }
+  function cancelEdit() {
+    setEditingId(null);
+    setEditDraft(null);
+  }
+  function saveEdit() {
+    if (!editingId || !editDraft) return;
+    updateTxn.mutate({ id: editingId, draft: editDraft });
+  }
+  const editValid = !!editDraft && editDraft.description.trim() && editDraft.category && parseFloat(editDraft.amount) > 0;
 
   function toggleRow(id: string, checked: boolean) {
     setSelected((prev) => {
@@ -223,9 +258,7 @@ export function Transactions() {
 
   const hasActiveFilters = !!(year || month || category.length || account.length || type || search);
 
-  function saveCurrentView() {
-    const name = window.prompt('Name this view:')?.trim();
-    if (!name) return;
+  function saveCurrentView(name: string) {
     setSavedViews([...savedViews, { id: crypto.randomUUID(), name, filters: currentFiltersSnapshot() }]);
   }
 
@@ -330,6 +363,7 @@ export function Transactions() {
           onSelectedChange={setCategory}
           exclude={categoryExclude}
           onExcludeChange={setCategoryExclude}
+          onApply={applyFilters}
         />
         <MultiSelectFilter
           label="Account"
@@ -338,6 +372,7 @@ export function Transactions() {
           onSelectedChange={setAccount}
           exclude={accountExclude}
           onExcludeChange={setAccountExclude}
+          onApply={applyFilters}
         />
         <Select value={type || ANY} onValueChange={(v) => setType(v === ANY ? '' : v)}>
           <SelectTrigger size="sm" className="w-[130px]"><SelectValue placeholder="Any type" /></SelectTrigger>
@@ -354,11 +389,7 @@ export function Transactions() {
             <X className="size-4" /> Clear
           </Button>
         )}
-        {hasActiveFilters && (
-          <Button variant="ghost" size="sm" onClick={saveCurrentView}>
-            Save View
-          </Button>
-        )}
+        {hasActiveFilters && <SaveViewPopover filters={currentFiltersSnapshot()} onSave={saveCurrentView} />}
         <Button size="sm" onClick={() => setShowAddForm(!showAddForm)}>
           <Plus className="size-4" /> Add Transactions
         </Button>
@@ -426,8 +457,8 @@ export function Transactions() {
             variant="destructive"
             size="sm"
             disabled={bulkDelete.isPending}
-            onClick={() => {
-              if (confirm(`Delete ${selected.size} selected transaction${selected.size === 1 ? '' : 's'}? This cannot be undone from the UI.`)) {
+            onClick={async () => {
+              if (await confirm(`Delete ${selected.size} selected transaction${selected.size === 1 ? '' : 's'}? This cannot be undone from the UI.`)) {
                 bulkDelete.mutate(Array.from(selected));
               }
             }}
@@ -556,27 +587,79 @@ export function Transactions() {
                 <div className="py-8 text-center text-sm text-muted-foreground">No transactions match these filters.</div>
               </TableCell></TableRow>
             ) : pagedRows.map((t) => (
-              <TableRow key={t.transaction_id} data-state={selected.has(t.transaction_id) ? 'selected' : undefined}>
-                <TableCell className="pl-6">
-                  <Checkbox
-                    checked={selected.has(t.transaction_id)}
-                    onCheckedChange={(v) => toggleRow(t.transaction_id, v === true)}
-                    aria-label={`Select ${t.description}`}
-                  />
-                </TableCell>
-                <TableCell className="whitespace-nowrap">{t.date}</TableCell>
-                <TableCell className="max-w-[380px] whitespace-normal break-words">{t.description}</TableCell>
-                <TableCell>{t.category}</TableCell>
-                <TableCell>{t.account}</TableCell>
-                <TableCell>{t.transaction_type}</TableCell>
-                <TableCell className="text-right tabular-nums">{fmtMoney(t.amount)}</TableCell>
-                <TableCell><Badge variant={SYNC_VARIANT[t.sync_status] ?? 'secondary'}>{t.sync_status}</Badge></TableCell>
-                <TableCell>
-                  <Button variant="destructive" size="sm" onClick={() => {
-                    if (confirm('Delete this transaction?')) deleteTxn.mutate(t.transaction_id);
-                  }}>Delete</Button>
-                </TableCell>
-              </TableRow>
+              editingId === t.transaction_id && editDraft ? (
+                <TableRow key={t.transaction_id} data-state="selected">
+                  <TableCell className="pl-6" />
+                  <TableCell>
+                    <Input type="date" value={editDraft.date}
+                      onChange={(e) => setEditDraft({ ...editDraft, date: e.target.value })} className="w-40" />
+                  </TableCell>
+                  <TableCell>
+                    <Input type="text" value={editDraft.description}
+                      onChange={(e) => setEditDraft({ ...editDraft, description: e.target.value })}
+                      className="min-w-[160px]" />
+                  </TableCell>
+                  <TableCell>
+                    <Select value={editDraft.category || ANY} onValueChange={(v) => setEditDraft({ ...editDraft, category: v === ANY ? '' : v })}>
+                      <SelectTrigger size="sm" className="w-[150px]"><SelectValue placeholder="Category…" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={ANY}>Category…</SelectItem>
+                        {categories.data?.map((c) => <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </TableCell>
+                  <TableCell>
+                    <Input type="text" value={editDraft.account}
+                      onChange={(e) => setEditDraft({ ...editDraft, account: e.target.value })} className="w-28" />
+                  </TableCell>
+                  <TableCell>
+                    <Select value={editDraft.transaction_type} onValueChange={(v) => setEditDraft({ ...editDraft, transaction_type: v })}>
+                      <SelectTrigger size="sm" className="w-[110px]"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Expense">Expense</SelectItem>
+                        <SelectItem value="Income">Income</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </TableCell>
+                  <TableCell>
+                    <Input type="number" step="0.01" value={editDraft.amount}
+                      onChange={(e) => setEditDraft({ ...editDraft, amount: e.target.value })} className="w-28 text-right" />
+                  </TableCell>
+                  <TableCell><Badge variant={SYNC_VARIANT[t.sync_status] ?? 'secondary'}>{t.sync_status}</Badge></TableCell>
+                  <TableCell className="whitespace-nowrap">
+                    <Button size="sm" disabled={!editValid || updateTxn.isPending} onClick={saveEdit}>
+                      {updateTxn.isPending ? 'Saving…' : 'Save'}
+                    </Button>
+                    <Button variant="outline" size="sm" className="ml-1.5" onClick={cancelEdit}>Cancel</Button>
+                    {updateTxn.isError && <div className="mt-1 text-xs text-destructive">{(updateTxn.error as Error).message}</div>}
+                  </TableCell>
+                </TableRow>
+              ) : (
+                <TableRow key={t.transaction_id} data-state={selected.has(t.transaction_id) ? 'selected' : undefined}>
+                  <TableCell className="pl-6">
+                    <Checkbox
+                      checked={selected.has(t.transaction_id)}
+                      onCheckedChange={(v) => toggleRow(t.transaction_id, v === true)}
+                      aria-label={`Select ${t.description}`}
+                    />
+                  </TableCell>
+                  <TableCell className="whitespace-nowrap">{t.date}</TableCell>
+                  <TableCell className="max-w-[380px] whitespace-normal break-words">{t.description}</TableCell>
+                  <TableCell>{t.category}</TableCell>
+                  <TableCell>{t.account}</TableCell>
+                  <TableCell>{t.transaction_type}</TableCell>
+                  <TableCell className="text-right tabular-nums">{fmtMoney(t.amount)}</TableCell>
+                  <TableCell><Badge variant={SYNC_VARIANT[t.sync_status] ?? 'secondary'}>{t.sync_status}</Badge></TableCell>
+                  <TableCell className="whitespace-nowrap">
+                    <Button variant="outline" size="sm" onClick={() => startEdit(t)}>
+                      <Pencil className="size-4" />
+                    </Button>
+                    <Button variant="destructive" size="sm" className="ml-1.5" onClick={async () => {
+                      if (await confirm('Delete this transaction?')) deleteTxn.mutate(t.transaction_id);
+                    }}>Delete</Button>
+                  </TableCell>
+                </TableRow>
+              )
             ))}
           </TableBody>
         </Table>
@@ -598,6 +681,8 @@ export function Transactions() {
           </div>
         </div>
       )}
+
+      {confirmDialog}
     </>
   );
 }

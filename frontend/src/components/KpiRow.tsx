@@ -5,15 +5,18 @@ import {
   SortableContext, arrayMove, horizontalListSortingStrategy, useSortable,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { GripVertical } from 'lucide-react';
+import { GripVertical, Info } from 'lucide-react';
 import { useLocalStorage } from '../lib/useLocalStorage';
 import { Card, CardContent } from '@/components/ui/card';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 
 export interface KpiTileData {
   id: string;
   label: string;
   value: string;
+  /** Plain-English explanation of what this KPI means and how it's computed - shown in a hover tooltip. */
+  description?: string;
   sub?: { text: string; className?: string };
 }
 
@@ -36,7 +39,21 @@ function SortableTile({ tile }: { tile: KpiTileData }) {
     >
       <CardContent className="px-5 py-4">
         <div className="flex items-center justify-between">
-          <div className="text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">{tile.label}</div>
+          <div className="flex items-center gap-1">
+            <div className="text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">{tile.label}</div>
+            {tile.description && (
+              <Tooltip>
+                <TooltipTrigger
+                  onPointerDown={(e) => e.stopPropagation()}
+                  className="text-muted-foreground/50 hover:text-muted-foreground"
+                  aria-label={`What is ${tile.label}?`}
+                >
+                  <Info className="size-3" />
+                </TooltipTrigger>
+                <TooltipContent>{tile.description}</TooltipContent>
+              </Tooltip>
+            )}
+          </div>
           <GripVertical className="size-3.5 shrink-0 cursor-grab text-muted-foreground/0 transition-colors group-hover:text-muted-foreground/60 active:cursor-grabbing" />
         </div>
         <div className="mt-1.5 text-2xl font-bold tabular-nums">{tile.value}</div>

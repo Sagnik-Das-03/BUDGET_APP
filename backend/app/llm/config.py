@@ -26,6 +26,7 @@ MODEL_DISPLAY_NAMES = {
 TASK_MODEL = {
     "autocomplete": "qwen3_0_6b",
     "categorize": "qwen3_0_6b",
+    "suggest_view_name": "qwen3_0_6b",
     "query_parse": "qwen3_4b",
     "summarize": "qwen3_4b",
     "quick_add": "qwen3_4b",

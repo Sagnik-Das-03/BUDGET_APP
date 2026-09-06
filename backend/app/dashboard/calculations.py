@@ -291,6 +291,60 @@ def budget_alerts(session: Session, period_key: str, warning_threshold: float = 
     return alerts
 
 
+def forecast(session: Session, period_key: Optional[str] = None, as_of: Optional[date_type] = None) -> dict:
+    """Projects a period's totals (and each budgeted category's spend) to
+    period-end by extrapolating the current daily pace: amount-so-far divided
+    by days elapsed so far, multiplied by the period's total length. A naive
+    but transparent projection - it has no idea a big recurring bill lands on
+    the 28th, it just assumes money keeps flowing in/out at the same average
+    rate it has so far. Only meaningful for the period currently in progress
+    (is_current=True); for a fully-elapsed past period, days_elapsed is
+    clamped to the period's full length, so pace collapses to 1x and the
+    'projected' figures just equal the final actuals - callers should treat
+    that as a signal to hide/relabel the forecast rather than show it as a
+    live prediction."""
+    pk = period_key or period_key_for(date_type.today())
+    p_start, p_end = period_start(pk), period_end(pk)
+    today = as_of or date_type.today()
+    days_in_period = (p_end - p_start).days + 1
+    is_current = p_start <= today <= p_end
+    counted_through = min(max(today, p_start), p_end)
+    days_elapsed = (counted_through - p_start).days + 1
+    pace = days_in_period / days_elapsed
+
+    t = totals(session, p_start, counted_through)
+    projected_income = round(t["income"] * pace, 2)
+    projected_expenses = round(t["expenses"] * pace, 2)
+    projected_net = round(projected_income - projected_expenses, 2)
+    projected_savings_rate = round(projected_net / projected_income, 4) if projected_income else 0.0
+
+    goals = BudgetRepository(session).for_period(pk)
+    actuals = {row["category"]: row["total"] for row in by_category(
+        session, date_from=p_start, date_to=counted_through, transaction_type="Expense")}
+    category_pace = []
+    for cat, goal in goals.items():
+        if goal <= 0:
+            continue
+        actual = actuals.get(cat, 0.0)
+        projected = round(actual * pace, 2)
+        pct = projected / goal
+        status = "over" if pct >= 1.0 else "watch" if pct >= 0.9 else "on_track"
+        category_pace.append({
+            "category": cat, "goal": goal, "actual": round(actual, 2),
+            "projected": projected, "pct": round(pct, 4), "status": status,
+        })
+    category_pace.sort(key=lambda r: -r["pct"])
+
+    return {
+        "period_key": pk, "is_current": is_current,
+        "days_elapsed": days_elapsed, "days_in_period": days_in_period,
+        "income_so_far": t["income"], "expenses_so_far": t["expenses"], "net_so_far": t["net"],
+        "projected_income": projected_income, "projected_expenses": projected_expenses,
+        "projected_net": projected_net, "projected_savings_rate": projected_savings_rate,
+        "category_pace": category_pace,
+    }
+
+
 def detect_anomalies(session: Session, date_from: Optional[date_type], date_to: Optional[date_type],
                       min_multiple: float = 2.0, min_absolute_gap: float = 100.0,
                       min_history: int = 3, limit: int = 5) -> list[dict]:
@@ -303,7 +357,13 @@ def detect_anomalies(session: Session, date_from: Optional[date_type], date_to: 
     LLM call is far too slow (seconds to a minute) for that. A category needs
     at least min_history prior transactions before it gets a baseline at
     all, so a category with one or two data points can't flag everything in
-    it as "unusual" relative to itself."""
+    it as "unusual" relative to itself.
+
+    Categories with counts_as_expense=False (SIP, Savings) are excluded
+    entirely - those are money that's still yours (invested or saved), the
+    same distinction _categorize_expense() draws for the KPIs, so a bigger
+    SIP contribution is good news, not something to red-flag as unusual
+    overspending."""
     history_stmt = select(Transaction).where(
         Transaction.deleted_at.is_(None), Transaction.transaction_type == TransactionType.expense,
     )
@@ -311,6 +371,8 @@ def detect_anomalies(session: Session, date_from: Optional[date_type], date_to: 
         history_stmt = history_stmt.where(Transaction.date < date_from)
     amounts_by_category: dict[str, list[float]] = {}
     for t in session.scalars(history_stmt):
+        if not t.category.counts_as_expense:
+            continue
         amounts_by_category.setdefault(t.category.name, []).append(t.amount)
     baselines = {
         name: sum(amounts) / len(amounts)
@@ -319,7 +381,7 @@ def detect_anomalies(session: Session, date_from: Optional[date_type], date_to: 
 
     anomalies = []
     for t in session.scalars(_base_query(date_from, date_to)):
-        if t.transaction_type != TransactionType.expense:
+        if t.transaction_type != TransactionType.expense or not t.category.counts_as_expense:
             continue
         baseline = baselines.get(t.category.name)
         if not baseline or baseline <= 0:

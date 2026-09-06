@@ -64,6 +64,36 @@ def test_transaction_create_update_soft_delete(session):
     assert txn.transaction_id not in [t.transaction_id for t in tx_repo.filter()]
 
 
+def test_update_category_and_account_reflects_immediately_on_the_returned_object(session):
+    """Regression test: update() used to only reassign category_id/account_id,
+    leaving the ORM's already-loaded txn.category/txn.account relationship
+    objects stale for the rest of the same session - so the content_hash
+    computed a few lines later (and any response built from the returned
+    object without a fresh reload) would silently keep showing the OLD
+    category/account even though the FK column itself was correct in the DB."""
+    cat_repo, acct_repo, tx_repo = CategoryRepository(session), AccountRepository(session), TransactionRepository(session)
+    old_category, old_account = cat_repo.get_by_name("Utilities"), acct_repo.get_or_create("Primary")
+    new_category = cat_repo.get_by_name("Shopping")
+    new_account = acct_repo.get_or_create("Secondary")
+
+    txn = tx_repo.create(
+        date=date(2026, 9, 1), description="Table and Chair Bought", amount=2750.0,
+        transaction_type=TransactionType.expense, category=old_category, account=old_account,
+    )
+
+    updated = tx_repo.update(txn.transaction_id, category=new_category, account=new_account)
+
+    assert updated.category.name == "Shopping"
+    assert updated.account.name == "Secondary"
+    # Re-fetching independently must agree with what update() returned - if the
+    # content_hash above were computed from stale relationship data, this
+    # would diverge from a hash computed on a clean reload of the same row.
+    refetched = tx_repo.get_by_transaction_id(txn.transaction_id)
+    assert refetched.category.name == "Shopping"
+    assert refetched.account.name == "Secondary"
+    assert refetched.content_hash == updated.content_hash
+
+
 def test_bulk_soft_delete_deletes_matching_ids_and_counts_only_those(session):
     cat_repo, acct_repo, tx_repo = CategoryRepository(session), AccountRepository(session), TransactionRepository(session)
     category, account = cat_repo.get_by_name("Shopping"), acct_repo.get_or_create("Primary")
