@@ -37,6 +37,7 @@ interface NewRow {
   category: string;
   account: string;
   suggestion?: string;
+  suggestionDurationSec?: number;
   categoryTouched?: boolean;
 }
 function emptyRow(): NewRow {
@@ -196,18 +197,20 @@ export function Transactions() {
   const suggestTimers = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
 
   function onDescriptionChange(rowId: number, value: string) {
-    updateRow(rowId, { description: value, suggestion: undefined });
+    updateRow(rowId, { description: value, suggestion: undefined, suggestionDurationSec: undefined });
     const existing = suggestTimers.current.get(rowId);
     if (existing) clearTimeout(existing);
     if (value.trim().length < 2) return;
     suggestTimers.current.set(rowId, setTimeout(async () => {
       try {
         const rowDate = newRows.find((r) => r.id === rowId)?.date;
+        const autocompleteStart = Date.now();
         const [{ suggestion }, { category: suggestedCategory }] = await Promise.all([
           api.autocomplete(value, rowDate),
           api.categorize(value),
         ]);
-        if (suggestion) updateRow(rowId, { suggestion });
+        const suggestionDurationSec = (Date.now() - autocompleteStart) / 1000;
+        if (suggestion) updateRow(rowId, { suggestion, suggestionDurationSec });
         // Never override a category the user picked themselves.
         setNewRows((rows) => rows.map((r) => (
           r.id === rowId && !r.categoryTouched && !r.category && suggestedCategory
@@ -298,9 +301,12 @@ export function Transactions() {
     })),
   });
 
+  const quickAddStartRef = useRef(0);
+  const [quickAddDuration, setQuickAddDuration] = useState<number | null>(null);
   const quickAdd = useMutation({
     mutationFn: (text: string) => api.quickAdd(text),
     onSuccess: (parsed) => {
+      setQuickAddDuration((Date.now() - quickAddStartRef.current) / 1000);
       setQuickAddText('');
       setShowAddForm(true);
       const filled: NewRow = {
@@ -323,6 +329,8 @@ export function Transactions() {
   function runQuickAdd() {
     const text = quickAddText.trim();
     if (!text || quickAdd.isPending) return;
+    quickAddStartRef.current = Date.now();
+    setQuickAddDuration(null);
     quickAdd.mutate(text);
   }
 
@@ -345,6 +353,9 @@ export function Transactions() {
         </Button>
         <ModelBadge task="quick_add" />
         {quickAdd.isError && <span className="text-sm text-destructive">{(quickAdd.error as Error).message}</span>}
+        {!quickAdd.isPending && quickAddDuration !== null && (
+          <span className="text-xs text-muted-foreground">Parsed in {quickAddDuration.toFixed(1)}s</span>
+        )}
       </div>
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
@@ -508,6 +519,9 @@ export function Transactions() {
                           onClick={() => acceptSuggestion(row.id, row.suggestion!)}
                         >
                           → {row.suggestion} <span className="opacity-60">(Tab)</span>
+                          {row.suggestionDurationSec !== undefined && (
+                            <span className="opacity-60"> · {row.suggestionDurationSec.toFixed(1)}s</span>
+                          )}
                         </button>
                       )}
                     </TableCell>
