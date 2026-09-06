@@ -1,9 +1,9 @@
 import type {
   Account, AskResponse, Budget, BudgetAlert, BudgetVsActual, Category, CategoryDrilldownNode,
-  CategoryTotal, CategoryTrend, CategoryVolatility, ChartPalette, ConflictRow, Forecast, Highlights,
+  CategoryTotal, CategoryTrend, CategoryVolatility, ChartPalette, ConflictRow, EssentialSplit, Forecast, Highlights,
   ImportCommitResult, ImportPreviewResult, ImportRowIn, Insight, LlmStatus, MonthlyBreakdownRow, QuickAddResult,
-  SavingsGoalProgress, SpendingPattern, SyncConfig, SyncLogEntry, SyncStatus, Totals, Transaction, TrashedTransaction,
-  TrendForRange, ViewFilters,
+  SavingsGoalProgress, SavingsStreak, SpendConcentration, SpendingPattern, SyncConfig, SyncLogEntry, SyncStatus,
+  Totals, Transaction, TrashedTransaction, TrendForRange, ViewFilters,
 } from './types';
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -64,6 +64,11 @@ export const api = {
     request<CategoryVolatility[]>(`/api/dashboard/category_volatility${qs({ months })}`),
   spendingPattern: (range: string, dateBounds?: DateBounds) =>
     request<SpendingPattern>(`/api/dashboard/spending_pattern${qs({ range, ...dateBounds })}`),
+  essentialSplit: (range: string, dateBounds?: DateBounds) =>
+    request<EssentialSplit>(`/api/dashboard/essential_split${qs({ range, ...dateBounds })}`),
+  savingsStreak: () => request<SavingsStreak>('/api/dashboard/savings_streak'),
+  spendConcentration: (range: string, topN = 3, dateBounds?: DateBounds) =>
+    request<SpendConcentration>(`/api/dashboard/spend_concentration${qs({ range, top_n: topN, ...dateBounds })}`),
 
   // ---------- savings goal ----------
   getSavingsGoal: () => request<{ period_key: string; goal_amount: number | null }>('/api/savings_goal'),
@@ -86,6 +91,8 @@ export const api = {
   updateCategory: (id: number, name: string, color_hex: string) =>
     request<Category>(`/api/categories/${id}`, { method: 'PUT', body: JSON.stringify({ name, color_hex }) }),
   deactivateCategory: (id: number) => request(`/api/categories/${id}`, { method: 'DELETE' }),
+  setCategoryEssential: (id: number, is_essential: boolean) =>
+    request<Category>(`/api/categories/${id}/is_essential${qs({ is_essential })}`, { method: 'PUT' }),
   listAccounts: () => request<Account[]>('/api/accounts'),
   addAccount: (name: string) => request<Account>('/api/accounts', { method: 'POST', body: JSON.stringify({ name }) }),
   deactivateAccount: (id: number) => request(`/api/accounts/${id}`, { method: 'DELETE' }),

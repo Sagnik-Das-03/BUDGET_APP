@@ -26,21 +26,28 @@ from typing import Optional
 # original 11 (between SIP's lime ~83° and Savings' teal ~175°) but was
 # picked by hand, not re-run through validate_palette.js - eyeball it in both
 # themes and adjust via Settings if it reads too close to a neighbor.
-# (name, color, counts_as_expense)
+#
+# is_essential is a starting guess (fixed/unavoidable obligation vs flexible
+# spending), not a judgment the app can verify - Rent/Utilities/Transport
+# default essential, everything else (including the Other catch-all)
+# defaults discretionary. Change any of it anytime via Settings; it's
+# independent of counts_as_expense, which is why SIP/Savings still need a
+# value here even though the split only ever looks at real expenses.
+# (name, color, counts_as_expense, is_essential)
 DEFAULT_CATEGORIES = [
-    ("Income", "#3B82F6", True),
-    ("Subscriptions", "#8B5CF6", True),
-    ("Quick-Commerce", "#0891B2", True),
-    ("Shopping", "#D97706", True),
-    ("Food-Order", "#EC4899", True),
-    ("SIP", "#65A30D", False),
-    ("Savings", "#0D9488", False),
-    ("Gift", "#D946EF", True),
-    ("RENT", "#F43F5E", True),
-    ("Transport", "#6366F1", True),
-    ("Utilities", "#EA580C", True),
-    ("Travel", "#16A34A", True),
-    ("Other", "#898781", True),
+    ("Income", "#3B82F6", True, True),
+    ("Subscriptions", "#8B5CF6", True, False),
+    ("Quick-Commerce", "#0891B2", True, False),
+    ("Shopping", "#D97706", True, False),
+    ("Food-Order", "#EC4899", True, False),
+    ("SIP", "#65A30D", False, True),
+    ("Savings", "#0D9488", False, True),
+    ("Gift", "#D946EF", True, False),
+    ("RENT", "#F43F5E", True, True),
+    ("Transport", "#6366F1", True, True),
+    ("Utilities", "#EA580C", True, True),
+    ("Travel", "#16A34A", True, False),
+    ("Other", "#898781", True, False),
 ]
 
 
@@ -57,11 +64,13 @@ class CategoryRepository:
     def get_by_name(self, name: str) -> Optional[Category]:
         return self.session.scalar(select(Category).where(Category.name == name))
 
-    def get_or_create(self, name: str, color_hex: str = "#898781", counts_as_expense: bool = True) -> Category:
+    def get_or_create(self, name: str, color_hex: str = "#898781", counts_as_expense: bool = True,
+                       is_essential: bool = True) -> Category:
         cat = self.get_by_name(name)
         if cat:
             return cat
-        cat = Category(name=name, color_hex=color_hex, is_active=True, counts_as_expense=counts_as_expense)
+        cat = Category(name=name, color_hex=color_hex, is_active=True, counts_as_expense=counts_as_expense,
+                        is_essential=is_essential)
         self.session.add(cat)
         self.session.flush()
         return cat
@@ -98,6 +107,14 @@ class CategoryRepository:
         self.session.flush()
         return cat
 
+    def set_is_essential(self, category_id: int, is_essential: bool) -> Optional[Category]:
+        cat = self.session.get(Category, category_id)
+        if not cat:
+            return None
+        cat.is_essential = is_essential
+        self.session.flush()
+        return cat
+
     def deactivate(self, category_id: int) -> Optional[Category]:
         cat = self.session.get(Category, category_id)
         if not cat:
@@ -107,7 +124,14 @@ class CategoryRepository:
         return cat
 
     def ensure_defaults(self) -> None:
-        for name, color, counts_as_expense in DEFAULT_CATEGORIES:
-            cat = self.get_or_create(name, color, counts_as_expense)
+        # counts_as_expense is re-synced below on every startup, since it's an
+        # objective fact about a category (SIP just isn't consumption) that a
+        # bug or manual DB edit shouldn't be able to drift away from. is_essential
+        # is a subjective judgment call with no single right answer - once a
+        # category exists, get_or_create() above only sets it at CREATION time,
+        # so a user's own Settings choice is never silently overwritten back to
+        # the seeded default on a later restart.
+        for name, color, counts_as_expense, is_essential in DEFAULT_CATEGORIES:
+            cat = self.get_or_create(name, color, counts_as_expense, is_essential)
             if cat.counts_as_expense != counts_as_expense:
                 cat.counts_as_expense = counts_as_expense

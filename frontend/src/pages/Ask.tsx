@@ -44,7 +44,8 @@ export function Ask() {
       </div>
       <p className="mb-5 mt-1 text-sm text-muted-foreground">
         Ask about your spending in plain English. A local AI model turns your question into a
-        query over your own transactions — it doesn't do the arithmetic itself.
+        query over your own transactions, then another pass phrases the final answer — neither
+        one does the arithmetic itself, that's computed straight from your data every time.
       </p>
 
       {history.length === 0 && !ask.isPending && (

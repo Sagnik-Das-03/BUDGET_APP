@@ -72,6 +72,10 @@ export function Settings() {
     mutationFn: ({ id, name, color }: { id: number; name: string; color: string }) => api.updateCategory(id, name, color),
     onSuccess: () => invalidate('categories'),
   });
+  const setCategoryEssential = useMutation({
+    mutationFn: ({ id, isEssential }: { id: number; isEssential: boolean }) => api.setCategoryEssential(id, isEssential),
+    onSuccess: () => invalidate('categories'),
+  });
 
   const setPalette = useMutation({
     mutationFn: (partial: Partial<ChartPalette>) => api.setPalette(partial),
@@ -202,6 +206,10 @@ export function Settings() {
       <Card>
         <CardHeader>
           <CardTitle>Categories</CardTitle>
+          <CardDescription>
+            "Essential" vs "Discretionary" is just your own label for the essential/discretionary split shown on the
+            Dashboard - click it to flip a category. It has no effect on any total or KPI by itself.
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex flex-wrap gap-2">
@@ -214,6 +222,16 @@ export function Settings() {
                   onChange={(color) => updateCategoryColor.mutate({ id: c.id, name: c.name, color })}
                 />
                 {c.name}
+                {c.name !== 'Income' && (
+                  <button
+                    type="button"
+                    className={c.is_essential ? 'text-emerald-600 dark:text-emerald-400' : 'text-muted-foreground'}
+                    title="Click to toggle essential / discretionary"
+                    onClick={() => setCategoryEssential.mutate({ id: c.id, isEssential: !c.is_essential })}
+                  >
+                    {c.is_essential ? 'Essential' : 'Discretionary'}
+                  </button>
+                )}
                 <button
                   className="ml-0.5 text-muted-foreground hover:text-destructive"
                   onClick={async () => {

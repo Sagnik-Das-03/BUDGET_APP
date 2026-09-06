@@ -103,6 +103,25 @@ def spending_pattern(range: str = "this_month", date_from: Optional[date_type] =
     return calc.spending_pattern(session, d_from, d_to)
 
 
+@router.get("/essential_split")
+def essential_split(range: str = "this_month", date_from: Optional[date_type] = None,
+                     date_to: Optional[date_type] = None, session: Session = Depends(get_session)):
+    d_from, d_to = _resolve_range(range, date_from, date_to)
+    return calc.essential_vs_discretionary(session, d_from, d_to)
+
+
+@router.get("/savings_streak")
+def savings_streak(session: Session = Depends(get_session)):
+    return calc.savings_streak(session)
+
+
+@router.get("/spend_concentration")
+def spend_concentration(range: str = "this_month", top_n: int = 3, date_from: Optional[date_type] = None,
+                         date_to: Optional[date_type] = None, session: Session = Depends(get_session)):
+    d_from, d_to = _resolve_range(range, date_from, date_to)
+    return calc.spend_concentration(session, d_from, d_to, top_n=top_n)
+
+
 @router.get("/budget_vs_actual")
 def budget_vs_actual(period_key: Optional[str] = None, session: Session = Depends(get_session)):
     pk = period_key or period_key_for(date_type.today())

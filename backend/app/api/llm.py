@@ -474,13 +474,45 @@ def ask(payload: AskIn, session: Session = Depends(get_session)):
     type_label = f" ({ttype.lower()})" if ttype else ""
 
     if aggregation == "count":
-        answer = f"You had {int(value)} transaction{'s' if value != 1 else ''} {scope}{type_label} {period_label}."
+        fallback_answer = f"You had {int(value)} transaction{'s' if value != 1 else ''} {scope}{type_label} {period_label}."
     elif aggregation == "avg":
-        answer = f"Your average transaction {scope}{type_label} {period_label} was Rs {value:,.0f}."
+        fallback_answer = f"Your average transaction {scope}{type_label} {period_label} was Rs {value:,.0f}."
     elif ttype == "Income":
-        answer = f"You received Rs {value:,.0f} {scope} {period_label}."
+        fallback_answer = f"You received Rs {value:,.0f} {scope} {period_label}."
     else:
-        answer = f"You spent Rs {value:,.0f} {scope}{type_label} {period_label}."
+        fallback_answer = f"You spent Rs {value:,.0f} {scope}{type_label} {period_label}."
+
+    # A second, short model call to phrase the final answer naturally instead
+    # of returning the rigid template above verbatim - it still does none of
+    # the arithmetic (that already happened in Python above), it only gets to
+    # choose how to say it. Grounded with the period's real totals as extra
+    # context it MAY reference (e.g. "that's a third of your spending this
+    # month") but the computed answer's own number is the one that must
+    # appear - the fallback template is used verbatim if this call fails.
+    answer = fallback_answer
+    if llm_router.available:
+        period_totals = calc.totals(session, date_from, date_to)
+        prompt = (
+            f'User question: "{question}"\n'
+            f"Computed answer: {aggregation} = Rs {value:,.0f}, {scope}{type_label}, {period_label} "
+            f"(from {len(rows)} transaction{'s' if len(rows) != 1 else ''}).\n"
+            f"Period totals for context - Income: Rs {period_totals['income']:,.0f}, "
+            f"Expenses: Rs {period_totals['expenses']:,.0f}, Net: Rs {period_totals['net']:,.0f}.\n\n"
+            "Answer the user's question directly in ONE natural, friendly sentence, using the computed "
+            "answer above as the headline number. You may reference the period totals for extra context "
+            "(e.g. what share of expenses this represents) only if the arithmetic is simple and exact - "
+            "never invent a number that isn't derivable from the ones given."
+        )
+        try:
+            llm_answer = llm_router.complete(
+                "summarize", prompt,
+                system_message="You are a precise personal-finance assistant. Never invent figures - only use the ones given.",
+                max_output_tokens=80,
+            ).strip()
+            if llm_answer:
+                answer = llm_answer
+        except Exception:
+            pass  # fallback_answer already set
 
     return AskOut(
         answer=answer,

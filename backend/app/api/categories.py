@@ -47,3 +47,12 @@ def set_counts_as_expense(category_id: int, counts_as_expense: bool, session: Se
         raise HTTPException(404, "Category not found")
     session.commit()
     return cat
+
+
+@router.put("/{category_id}/is_essential", response_model=CategoryOut)
+def set_is_essential(category_id: int, is_essential: bool, session: Session = Depends(get_session)):
+    cat = CategoryRepository(session).set_is_essential(category_id, is_essential)
+    if not cat:
+        raise HTTPException(404, "Category not found")
+    session.commit()
+    return cat

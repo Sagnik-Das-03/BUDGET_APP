@@ -56,6 +56,13 @@ class Category(Base):
     # consumption (SIP, Savings) - excluded from the Expenses/Net Savings KPI so
     # "Net Savings" reflects money not consumed, not just cash sitting idle.
     counts_as_expense: Mapped[bool] = mapped_column(Boolean, default=True)
+    # True for a category that's a fixed/unavoidable obligation (Rent, Utilities,
+    # Transport) vs one that's flexible spending (Shopping, Food-Order, Travel) -
+    # purely a labeling choice for the essential/discretionary split, independent
+    # of counts_as_expense (SIP/Savings aren't "expenses" at all either way).
+    # Defaults to True so a brand-new category doesn't silently get lumped into
+    # "discretionary" - the user decides otherwise via Settings.
+    is_essential: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     transactions: Mapped[list["Transaction"]] = relationship(back_populates="category")

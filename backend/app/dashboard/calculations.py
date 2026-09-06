@@ -543,6 +543,84 @@ def spending_pattern(session: Session, date_from: Optional[date_type] = None,
     }
 
 
+def essential_vs_discretionary(session: Session, date_from: Optional[date_type] = None,
+                                date_to: Optional[date_type] = None) -> dict:
+    """Splits real expense spending (counts_as_expense=True categories only -
+    SIP/Savings are excluded the same way the Expenses KPI already excludes
+    them) into essential (Category.is_essential=True - Rent/Utilities/etc by
+    default) vs discretionary. is_essential is a user-editable judgment call
+    (see Settings, and DEFAULT_CATEGORIES' seeded starting guess), not
+    something this function determines on its own."""
+    essential = 0.0
+    discretionary = 0.0
+    for t in session.scalars(_base_query(date_from, date_to)):
+        if t.transaction_type != TransactionType.expense or not t.category.counts_as_expense:
+            continue
+        if t.category.is_essential:
+            essential += t.amount
+        else:
+            discretionary += t.amount
+    total = essential + discretionary
+    return {
+        "essential": round(essential, 2), "discretionary": round(discretionary, 2),
+        "essential_pct": round(essential / total, 4) if total else 0.0,
+        "discretionary_pct": round(discretionary / total, 4) if total else 0.0,
+    }
+
+
+def savings_streak(session: Session, as_of: Optional[date_type] = None) -> dict:
+    """How many consecutive FULLY-ELAPSED months (most recent first, the
+    current in-progress month excluded so a half-finished month doesn't
+    falsely end a streak) have had a positive net - built on the same
+    monthly_breakdown() data as the Dashboard's monthly savings-rate trend.
+    Also reports the longest streak on record, for context on whether the
+    current run is actually notable."""
+    current_period_key = period_key_for(as_of or date_type.today())
+    rows = sorted(
+        (r for r in monthly_breakdown(session) if r["period_key"] < current_period_key),
+        key=lambda r: r["period_key"],
+    )
+
+    current_streak = 0
+    for r in reversed(rows):
+        if r["net"] <= 0:
+            break
+        current_streak += 1
+
+    best_streak = running = 0
+    for r in rows:
+        running = running + 1 if r["net"] > 0 else 0
+        best_streak = max(best_streak, running)
+
+    return {
+        "current_streak_months": current_streak,
+        "best_streak_months": best_streak,
+        "months_observed": len(rows),
+    }
+
+
+def spend_concentration(session: Session, date_from: Optional[date_type] = None,
+                         date_to: Optional[date_type] = None, top_n: int = 3) -> dict:
+    """What share of real expense spending came from just the top_n largest
+    single transactions in the period - flags whether a big period total is
+    concentrated in a few big-ticket purchases (a one-off, less actionable)
+    or spread across many small ones (an everyday-habits problem), which
+    changes what you'd actually do about it. Complements the Largest Expense
+    KPI, which only ever shows the single biggest transaction."""
+    amounts = sorted(
+        (t.amount for t in session.scalars(_base_query(date_from, date_to))
+         if t.transaction_type == TransactionType.expense and t.category.counts_as_expense),
+        reverse=True,
+    )
+    total = sum(amounts)
+    top_sum = sum(amounts[:top_n])
+    return {
+        "top_n": top_n, "top_sum": round(top_sum, 2), "total": round(total, 2),
+        "pct": round(top_sum / total, 4) if total else 0.0,
+        "transaction_count": len(amounts),
+    }
+
+
 def period_start(period_key: str) -> date_type:
     year, month = period_key.split("-")
     return date_type(int(year), int(month), 1)

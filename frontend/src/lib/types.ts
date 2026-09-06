@@ -4,6 +4,7 @@ export interface Category {
   color_hex: string;
   is_active: boolean;
   counts_as_expense: boolean;
+  is_essential: boolean;
 }
 
 export interface Account {
@@ -189,6 +190,27 @@ export interface SpendingPatternRow {
 export interface SpendingPattern {
   by_day_of_week: SpendingPatternRow[];
   by_month_third: SpendingPatternRow[];
+}
+
+export interface EssentialSplit {
+  essential: number;
+  discretionary: number;
+  essential_pct: number;
+  discretionary_pct: number;
+}
+
+export interface SavingsStreak {
+  current_streak_months: number;
+  best_streak_months: number;
+  months_observed: number;
+}
+
+export interface SpendConcentration {
+  top_n: number;
+  top_sum: number;
+  total: number;
+  pct: number;
+  transaction_count: number;
 }
 
 export interface Forecast {

@@ -15,6 +15,7 @@ class CategoryOut(BaseModel):
     color_hex: str
     is_active: bool
     counts_as_expense: bool
+    is_essential: bool
 
     model_config = {"from_attributes": True}
 

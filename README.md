@@ -55,6 +55,82 @@ AI-generated explanation, anomaly detection's summary, "ask your budget") to
 whichever model is configured for it - a small model for per-keystroke tasks,
 a larger one for anything that can afford to be slower.
 
+## Data model
+
+```mermaid
+erDiagram
+    CATEGORY {
+        int id PK
+        string name UK
+        string color_hex
+        bool counts_as_expense "false for SIP/Savings - not real spending"
+        bool is_essential "fixed obligation vs flexible - editable in Settings"
+        bool is_active
+    }
+    ACCOUNT {
+        int id PK
+        string name UK
+        string account_type
+        bool is_active
+    }
+    TRANSACTION {
+        string transaction_id UK "TXN-YYYY-NNNNNN, permanent"
+        date date
+        string description
+        float amount
+        enum transaction_type "Income or Expense"
+        string period_key "derived from date, e.g. 2026-09"
+        string content_hash "for change/conflict detection"
+        enum sync_status "pending, synced, conflict, error"
+        datetime deleted_at "soft delete - trash"
+    }
+    BUDGET {
+        int id PK
+        float goal_amount
+        string period_key "null = recurring monthly default"
+    }
+    SAVINGS_GOAL {
+        int id PK
+        float goal_amount
+        string period_key "null = recurring monthly default"
+    }
+    MONTHLY_PERIOD {
+        string period_key PK "2026-09"
+        string label "September 2026"
+        int sheet_gid "linked Sheets tab, if synced"
+    }
+    APP_SETTING {
+        string key PK
+        string value
+    }
+    SYNC_META {
+        string spreadsheet_id
+        string sheet_name
+        int last_row_count
+    }
+    SYNC_LOG {
+        datetime timestamp
+        enum level
+        string message
+    }
+
+    CATEGORY ||--o{ TRANSACTION : categorizes
+    ACCOUNT  ||--o{ TRANSACTION : holds
+    CATEGORY ||--o{ BUDGET : "has a goal in"
+    TRANSACTION }o..o{ MONTHLY_PERIOD : "period_key match (not a real FK)"
+    SAVINGS_GOAL }o..o{ MONTHLY_PERIOD : "period_key match (not a real FK)"
+```
+
+`Transaction` is the only table most features touch - `category_id`/`account_id`
+are real foreign keys, but `period_key` (also on `Budget` and `SavingsGoal`) is
+just a derived string (`YYYY-MM`) compared by value, not a foreign key -
+`MonthlyPeriod` exists purely to remember which Sheets tab (`sheet_gid`) backs
+each period, not to constrain anything. `SyncMeta`/`SyncLog` track the sync
+engine's own state and aren't referenced by anything else. `dashboard/
+calculations.py` (the single source of truth for every number shown anywhere)
+reads `Transaction` joined to `Category`/`Account` directly - it never goes
+through the API layer.
+
 ## First-time setup
 
 1. Double-click `run.bat` (repo root). It builds the frontend (`npm install` +

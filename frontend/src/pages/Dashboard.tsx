@@ -16,6 +16,7 @@ import { InsightCard } from '../components/InsightCard';
 import { CategoryTrends } from '../components/CategoryTrends';
 import { CategoryConsistency } from '../components/CategoryConsistency';
 import { SpendingPatternCard } from '../components/SpendingPatternCard';
+import { SavingsRateTrendChart } from '../components/SavingsRateTrendChart';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 const RANGE_LABEL: Record<RangeKey, string> = {
@@ -76,10 +77,20 @@ export function Dashboard() {
     queryFn: () => api.categoryDrilldown(effectiveRange, 'Expense', effectiveBounds),
   });
   const budget = useQuery({ queryKey: ['budgetVsActual'], queryFn: api.budgetVsActual });
-  const monthlyBreakdown = useQuery({
-    queryKey: ['monthlyBreakdown'], queryFn: api.monthlyBreakdown, enabled: range === 'all_time',
-  });
+  // Not gated to range === 'all_time' - the month/year dropdowns below only
+  // read it in that view, but the "Monthly Savings Rate" trend chart wants
+  // this all-time history regardless of whichever range is currently picked.
+  const monthlyBreakdown = useQuery({ queryKey: ['monthlyBreakdown'], queryFn: api.monthlyBreakdown });
   const alerts = useQuery({ queryKey: ['budgetAlerts'], queryFn: api.budgetAlerts });
+  const essentialSplit = useQuery({
+    queryKey: ['essentialSplit', effectiveRange, selectedYear, selectedMonth],
+    queryFn: () => api.essentialSplit(effectiveRange, effectiveBounds),
+  });
+  const savingsStreak = useQuery({ queryKey: ['savingsStreak'], queryFn: api.savingsStreak });
+  const spendConcentration = useQuery({
+    queryKey: ['spendConcentration', effectiveRange, selectedYear, selectedMonth],
+    queryFn: () => api.spendConcentration(effectiveRange, 3, effectiveBounds),
+  });
   // The goal is inherently monthly, so it only makes sense to compare against a
   // specific month - when one's drilled into (from This Year or All Time), compare
   // against that month instead of always defaulting to the real current month.
@@ -161,6 +172,29 @@ export function Dashboard() {
       description: 'The single biggest transaction this period, and the category it fell under.',
       sub: largestExpense ? { text: `${largestExpense.name} · ${largestExpense.category}` } : undefined,
     },
+    {
+      id: 'essential-split', label: 'Essential Spend',
+      value: essentialSplit.data ? fmtPct(essentialSplit.data.essential_pct) : '—',
+      description: 'Share of real spending on categories marked "Essential" in Settings (Rent, Utilities, etc. by default) vs. flexible/discretionary spending.',
+      sub: essentialSplit.data ? {
+        text: `${fmtMoney(essentialSplit.data.essential)} essential · ${fmtMoney(essentialSplit.data.discretionary)} discretionary`,
+      } : undefined,
+    },
+    {
+      id: 'savings-streak', label: 'Savings Streak',
+      value: savingsStreak.data ? `${savingsStreak.data.current_streak_months} mo` : '—',
+      description: 'Consecutive fully-completed months with a positive Net Savings, counting back from the most recent closed month.',
+      sub: savingsStreak.data?.best_streak_months
+        ? { text: `Best: ${savingsStreak.data.best_streak_months} mo` } : undefined,
+    },
+    {
+      id: 'spend-concentration', label: 'Top 3 Concentration',
+      value: spendConcentration.data ? fmtPct(spendConcentration.data.pct) : '—',
+      description: 'Share of this period\'s real spending that came from just the 3 largest single transactions - a high share means a few big-ticket purchases, not everyday habits, drove the total.',
+      sub: spendConcentration.data
+        ? { text: `${fmtMoney(spendConcentration.data.top_sum)} of ${fmtMoney(spendConcentration.data.total)}` }
+        : undefined,
+    },
   ];
 
   const monthOptions = range === 'this_year' && trend.data?.granularity === 'monthly'
@@ -229,6 +263,7 @@ export function Dashboard() {
         <CategoryTrends range={effectiveRange} dateBounds={effectiveBounds} />
         <CategoryConsistency />
         <SpendingPatternCard range={effectiveRange} dateBounds={effectiveBounds} />
+        <SavingsRateTrendChart rows={monthlyBreakdown.data} />
       </div>
     </>
   );
