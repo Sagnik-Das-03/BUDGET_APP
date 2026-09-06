@@ -270,7 +270,7 @@ export function Dashboard() {
           { id: 'category-consistency', node: <CategoryConsistency /> },
           { id: 'spending-pattern', node: <SpendingPatternCard range={effectiveRange} dateBounds={effectiveBounds} /> },
           { id: 'savings-rate-trend', node: <SavingsRateTrendChart rows={monthlyBreakdown.data} /> },
-          { id: 'essential-split', node: <EssentialSplitCard data={essentialSplit.data} /> },
+          { id: 'essential-split', node: <EssentialSplitCard data={essentialSplit.data} />, className: 'md:col-span-2' },
         ]}
       />
     </>

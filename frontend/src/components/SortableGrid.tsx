@@ -11,9 +11,13 @@ import { cn } from '@/lib/utils';
 export interface SortableGridItem {
   id: string;
   node: ReactNode;
+  /** Extra classes on this item's own grid cell - e.g. "md:col-span-2" to span full width. */
+  className?: string;
 }
 
-function SortableTile({ id, handle, children }: { id: string; handle: boolean; children: ReactNode }) {
+function SortableTile({
+  id, handle, className, children,
+}: { id: string; handle: boolean; className?: string; children: ReactNode }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
   const style = { transform: CSS.Transform.toString(transform), transition };
 
@@ -24,7 +28,7 @@ function SortableTile({ id, handle, children }: { id: string; handle: boolean; c
   if (!handle) {
     return (
       <div
-        ref={setNodeRef} style={style} className={cn(isDragging && 'z-10 opacity-40')}
+        ref={setNodeRef} style={style} className={cn(isDragging && 'z-10 opacity-40', className)}
         {...attributes} {...listeners}
       >
         {children}
@@ -33,7 +37,7 @@ function SortableTile({ id, handle, children }: { id: string; handle: boolean; c
   }
 
   return (
-    <div ref={setNodeRef} style={style} className={cn('group relative', isDragging && 'z-10 opacity-40 shadow-lg')}>
+    <div ref={setNodeRef} style={style} className={cn('group relative', isDragging && 'z-10 opacity-40 shadow-lg', className)}>
       <button
         type="button"
         className="absolute right-2.5 top-2.5 z-10 cursor-grab rounded p-1 text-muted-foreground/0 transition-colors group-hover:text-muted-foreground/60 hover:bg-accent active:cursor-grabbing"
@@ -85,7 +89,7 @@ export function SortableGrid({ storageKey, items, className, handle = false }: S
       <SortableContext items={orderedIds} strategy={rectSortingStrategy}>
         <div className={className}>
           {ordered.map((item) => (
-            <SortableTile key={item.id} id={item.id} handle={handle}>{item.node}</SortableTile>
+            <SortableTile key={item.id} id={item.id} handle={handle} className={item.className}>{item.node}</SortableTile>
           ))}
         </div>
       </SortableContext>

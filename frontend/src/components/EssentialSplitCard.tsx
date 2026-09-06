@@ -1,11 +1,11 @@
 import { useState } from 'react';
-import { ChevronDown, ChevronUp, PieChart } from 'lucide-react';
+import { PieChart } from 'lucide-react';
 import type { EssentialSplit, EssentialSplitCategory } from '../lib/types';
 import { fmtMoney, fmtPct } from '../lib/format';
-import { Button } from '@/components/ui/button';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
-function CategoryList({ rows, dotClassName }: { rows: EssentialSplitCategory[]; dotClassName: string }) {
+function CategoryList({ rows, sideTotal, dotClassName }: { rows: EssentialSplitCategory[]; sideTotal: number; dotClassName: string }) {
   if (!rows.length) return <p className="text-xs text-muted-foreground">None this period.</p>;
   return (
     <ul className="flex flex-col gap-1.5">
@@ -15,7 +15,10 @@ function CategoryList({ rows, dotClassName }: { rows: EssentialSplitCategory[]; 
             <span className={`size-2 shrink-0 rounded-full ${dotClassName}`} />
             <span className="truncate">{r.category}</span>
           </span>
-          <span className="shrink-0 font-medium tabular-nums">{fmtMoney(r.total)}</span>
+          <span className="shrink-0 tabular-nums">
+            <span className="font-medium">{fmtMoney(r.total)}</span>{' '}
+            <span className="text-xs text-muted-foreground">({fmtPct(sideTotal ? r.total / sideTotal : 0)})</span>
+          </span>
         </li>
       ))}
     </ul>
@@ -27,10 +30,11 @@ function CategoryList({ rows, dotClassName }: { rows: EssentialSplitCategory[]; 
 // its own request. Purely descriptive, no threshold or judgment - is_essential
 // itself is the user's own call, made per-category in Settings.
 export function EssentialSplitCard({ data }: { data: EssentialSplit | undefined }) {
-  const [showDetails, setShowDetails] = useState(false);
+  const [view, setView] = useState<'summary' | 'breakdown'>('summary');
   if (!data || (data.essential === 0 && data.discretionary === 0)) return null;
 
   const essentialPct = data.essential_pct * 100;
+  const showDetails = view === 'breakdown';
 
   return (
     <Card>
@@ -41,10 +45,17 @@ export function EssentialSplitCard({ data }: { data: EssentialSplit | undefined 
           </CardTitle>
           <p className="mt-1 text-xs text-muted-foreground">Based on which categories are marked "Essential" in Settings.</p>
         </div>
-        <Button variant="ghost" size="sm" className="h-7 shrink-0 px-2 text-xs" onClick={() => setShowDetails((v) => !v)}>
-          {showDetails ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />}
-          {showDetails ? 'Hide' : 'Breakdown'}
-        </Button>
+        <ToggleGroup
+          type="single"
+          variant="outline"
+          size="sm"
+          value={view}
+          onValueChange={(v) => v && setView(v as 'summary' | 'breakdown')}
+          className="shrink-0"
+        >
+          <ToggleGroupItem value="summary" className="px-2.5 text-xs">Summary</ToggleGroupItem>
+          <ToggleGroupItem value="breakdown" className="px-2.5 text-xs">Breakdown</ToggleGroupItem>
+        </ToggleGroup>
       </CardHeader>
       <CardContent className="flex flex-col gap-3.5">
         <div className="h-3 w-full overflow-hidden rounded-full bg-muted">
@@ -67,11 +78,11 @@ export function EssentialSplitCard({ data }: { data: EssentialSplit | undefined 
           <div className="grid grid-cols-1 gap-4 border-t pt-3.5 sm:grid-cols-2">
             <div>
               <p className="mb-1.5 text-xs font-semibold tracking-wide text-muted-foreground uppercase">Essential</p>
-              <CategoryList rows={data.essential_categories} dotClassName="bg-emerald-500" />
+              <CategoryList rows={data.essential_categories} sideTotal={data.essential} dotClassName="bg-emerald-500" />
             </div>
             <div>
               <p className="mb-1.5 text-xs font-semibold tracking-wide text-muted-foreground uppercase">Discretionary</p>
-              <CategoryList rows={data.discretionary_categories} dotClassName="bg-muted-foreground/40" />
+              <CategoryList rows={data.discretionary_categories} sideTotal={data.discretionary} dotClassName="bg-muted-foreground/40" />
             </div>
           </div>
         )}
