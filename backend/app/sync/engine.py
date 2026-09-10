@@ -127,14 +127,15 @@ def compact_and_sort(sheets: GoogleSheetsService, spreadsheet_id: str, descendin
     since a permanent delete - the only thing that actually creates a blank
     row - happens synchronously in its own endpoint, not through pull()/
     push(), so it wouldn't otherwise be noticed here. The read is cheap;
-    the full-tab rewrite only happens when there's something to remove or
-    reorder, to avoid burning write quota on a no-op cycle - but clearing
-    conditional formatting is checked and (if needed) done unconditionally
-    every cycle regardless of that, since otherwise a sheet that's already
-    compact and sorted would never have a chance to sweep away leftover
-    formatting (e.g. the row color-tinting this tab briefly did)."""
-    sheet_id = sheets.ensure_sheet(spreadsheet_id, TRANSACTIONS_SHEET)
-    sheets.clear_conditional_formats(spreadsheet_id, sheet_id)
+    the full-tab CONTENT rewrite (clear_and_write of every row) only happens
+    when there's something to remove or reorder, to avoid burning write
+    quota on a no-op cycle. Formatting (header/alignment/number format/text
+    color, plus clearing any leftover conditional formatting) is cheap - one
+    batched request regardless of row count - so it's reapplied every cycle
+    unconditionally; gating it the same way the content rewrite is gated
+    would mean a sheet that's already compact and sorted never gets its
+    formatting refreshed at all."""
+    reports_mod.format_transactions_header(sheets, spreadsheet_id)
 
     raw_rows = sheets.get_rows(spreadsheet_id, TRANSACTIONS_SHEET)
     if len(raw_rows) <= 1:
@@ -157,7 +158,6 @@ def compact_and_sort(sheets: GoogleSheetsService, spreadsheet_id: str, descendin
     reordered = final_rows != non_blank
     if removed or reordered:
         sheets.clear_and_write(spreadsheet_id, TRANSACTIONS_SHEET, [mapping.HEADERS] + final_rows)
-        reports_mod.format_transactions_header(sheets, spreadsheet_id)
     return {"removed_blank": removed, "reordered": reordered}
 
 

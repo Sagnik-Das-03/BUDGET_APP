@@ -87,6 +87,25 @@ def test_no_op_when_already_compact_and_sorted(sheets):
     assert result == {"removed_blank": 0, "reordered": False}
 
 
+def test_formatting_is_reapplied_even_when_nothing_needs_reordering(sheets, monkeypatch):
+    """Regression test: format_transactions_header() (header bold, column
+    alignment, plain-number format, black text color) used to run only
+    inside the same "if removed or reordered" branch as the content
+    rewrite - so a sheet that's already compact and sorted never had its
+    formatting refreshed at all, e.g. text color forced back to black."""
+    sheets.ensure_sheet(SPREADSHEET_ID, "Transactions")
+    rows = [_row("TXN-2026-000002", date(2026, 9, 10)), _row("TXN-2026-000001", date(2026, 9, 1))]
+    sheets.clear_and_write(SPREADSHEET_ID, "Transactions", [mapping.HEADERS] + rows)
+
+    calls = []
+    monkeypatch.setattr(reports_mod, "format_transactions_header", lambda *a, **k: calls.append(1))
+
+    result = compact_and_sort(sheets, SPREADSHEET_ID)
+
+    assert result == {"removed_blank": 0, "reordered": False}  # confirms this is the "nothing to do" path
+    assert calls == [1]
+
+
 def test_clears_leftover_tint_even_when_nothing_needs_reordering(sheets):
     """Regression test: the full-tab rewrite (which used to be the only path
     that cleared conditional formats) is skipped entirely when the sheet is
