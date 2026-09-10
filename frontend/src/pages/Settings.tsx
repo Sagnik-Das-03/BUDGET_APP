@@ -39,6 +39,18 @@ export function Settings() {
     onSuccess: () => invalidate('syncConfig'),
   });
 
+  const compactSheet = useMutation({ mutationFn: () => api.compactSheetNow() });
+  const compactMessage = (() => {
+    const r = compactSheet.data;
+    if (!r) return null;
+    if ('error' in r) return r.error;
+    if (!r.removed_blank && !r.reordered) return 'Already tidy — nothing to clean up or reorder.';
+    const parts = [];
+    if (r.removed_blank) parts.push(`removed ${r.removed_blank} blank row${r.removed_blank === 1 ? '' : 's'}`);
+    if (r.reordered) parts.push('re-sorted by date (newest first)');
+    return parts.join(', ') + '.';
+  })();
+
   const saveSavingsGoal = useMutation({
     mutationFn: (amount: number) => api.setSavingsGoal(amount),
     onSuccess: () => invalidate('savingsGoal'),
@@ -136,6 +148,16 @@ export function Settings() {
             Takes effect immediately, no restart — overrides SYNC_INTERVAL_SECONDS in .env
             (default: {config.data?.sync_interval_default}s) until changed again here.
           </span>
+        </CardContent>
+        <CardContent className="flex flex-wrap items-center gap-2.5 border-t pt-4">
+          <Button size="sm" variant="outline" disabled={compactSheet.isPending} onClick={() => compactSheet.mutate()}>
+            {compactSheet.isPending ? 'Cleaning up…' : 'Clean Up & Sort Sheet Now'}
+          </Button>
+          <span className="text-xs text-muted-foreground">
+            Removes blank rows (left behind by a permanent delete) and re-sorts the Transactions tab by date,
+            newest first. This already happens automatically on every sync — use this to see it right away.
+          </span>
+          {compactMessage && <span className="w-full text-xs text-muted-foreground">{compactMessage}</span>}
         </CardContent>
       </Card>
 

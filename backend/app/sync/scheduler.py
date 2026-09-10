@@ -14,7 +14,7 @@ from app.repositories.app_settings import SYNC_INTERVAL_KEY, AppSettingRepositor
 from app.repositories.categories import CategoryRepository
 from app.repositories.accounts import AccountRepository
 from app.sheets.adapter import GoogleSheetsService
-from app.sync.engine import run_sync_cycle
+from app.sync.engine import compact_and_sort, run_sync_cycle
 from typing import Optional
 
 MIN_INTERVAL_SECONDS = 15  # floor to avoid hammering the Sheets API from the UI
@@ -131,6 +131,28 @@ def run_once() -> dict:
     except Exception as e:
         logger.exception("sync cycle crashed")
         _set_status(state="error", last_error=str(e))
+        return {"error": str(e)}
+    finally:
+        _sync_lock.release()
+
+
+def run_compact_and_sort_once() -> dict:
+    """Runs just the Sheet tidy-up pass (blank-row cleanup, date-descending
+    sort, category color-tint refresh) on demand, without waiting for the
+    next full sync cycle - for the "Clean up & Sort Sheet Now" button in
+    Settings. Shares _sync_lock with run_once() so it can't run concurrently
+    with (or be raced by) a real pull/push cycle."""
+    if not settings.credentials_configured:
+        return {"error": "Google credentials not configured yet - see docs/service_account_setup.md"}
+    if not _sync_lock.acquire(blocking=False):
+        return {"error": "sync already in progress"}
+    try:
+        sheets = _sheets_client()
+        spreadsheet_id = _resolve_spreadsheet_id(sheets)
+        with session_scope() as session:
+            return compact_and_sort(session, sheets, spreadsheet_id)
+    except Exception as e:
+        logger.exception("manual sheet compaction crashed")
         return {"error": str(e)}
     finally:
         _sync_lock.release()

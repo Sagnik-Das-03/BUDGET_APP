@@ -11,6 +11,15 @@ def _hex_to_rgb(hex_color: str) -> dict:
     return {"red": int(h[0:2], 16) / 255, "green": int(h[2:4], 16) / 255, "blue": int(h[4:6], 16) / 255}
 
 
+def _lightened_rgb(hex_color: str, toward_white: float = 0.82) -> dict:
+    """A category's full chart color (e.g. RENT's saturated rose) makes a
+    fine small swatch but is overwhelming as a whole-row background - this
+    blends it most of the way toward white first, for a soft tint instead
+    of a loud block of color."""
+    rgb = _hex_to_rgb(hex_color)
+    return {k: v + (1 - v) * toward_white for k, v in rgb.items()}
+
+
 def bold_header_request(sheet_id: int, row0: int, num_cols: int) -> dict:
     return {
         "repeatCell": {
@@ -53,6 +62,65 @@ def currency_format_request(sheet_id: int, row_start0: int, row_end0: int, col_s
                       "startColumnIndex": col_start0, "endColumnIndex": col_end0},
             "cell": {"userEnteredFormat": {"numberFormat": {"type": "CURRENCY", "pattern": "₹#,##0.00"}}},
             "fields": "userEnteredFormat.numberFormat",
+        }
+    }
+
+
+def plain_number_format_request(sheet_id: int, row_start0: int, row_end0: int, col_start0: int, col_end0: int) -> dict:
+    """A currency symbol on the Amount column looks nice on the read-only
+    generated report tabs, but on the editable Transactions tab it meant a
+    value typed directly into the sheet came back from the API pre-formatted
+    (e.g. "₹2,000.00") and had to be stripped back out before parsing - this
+    keeps that column's cells as a plain number instead."""
+    return {
+        "repeatCell": {
+            "range": {"sheetId": sheet_id, "startRowIndex": row_start0, "endRowIndex": row_end0,
+                      "startColumnIndex": col_start0, "endColumnIndex": col_end0},
+            "cell": {"userEnteredFormat": {"numberFormat": {"type": "NUMBER", "pattern": "0.00"}}},
+            "fields": "userEnteredFormat.numberFormat",
+        }
+    }
+
+
+def column_alignment_request(sheet_id: int, row_start0: int, row_end0: int, col0: int, alignment: str) -> dict:
+    """alignment: "LEFT" | "CENTER" | "RIGHT"."""
+    return {
+        "repeatCell": {
+            "range": {"sheetId": sheet_id, "startRowIndex": row_start0, "endRowIndex": row_end0,
+                      "startColumnIndex": col0, "endColumnIndex": col0 + 1},
+            "cell": {"userEnteredFormat": {"horizontalAlignment": alignment}},
+            "fields": "userEnteredFormat.horizontalAlignment",
+        }
+    }
+
+
+def category_row_tint_rule(sheet_id: int, num_cols: int, category_col0: int, category_name: str,
+                            color_hex: str, index: int, row_start1: int = 2, row_end0: int = 5000) -> dict:
+    """Tints an entire data row with a soft, lightened version of its own
+    category's chart color, so the Transactions tab visually matches the
+    app's own category color-coding - a conditional format rule (not a
+    one-off cell color) so it applies automatically to every row with that
+    category, including ones typed straight into the Sheet, without needing
+    to be reapplied by hand or re-run per row on every sync. category_col0
+    is 0-indexed; the custom formula below turns it into the matching A1
+    column letter to check that column while coloring the whole row."""
+    col_letter = chr(ord("A") + category_col0)
+    return {
+        "addConditionalFormatRule": {
+            "rule": {
+                "ranges": [{
+                    "sheetId": sheet_id, "startRowIndex": row_start1 - 1, "endRowIndex": row_end0,
+                    "startColumnIndex": 0, "endColumnIndex": num_cols,
+                }],
+                "booleanRule": {
+                    "condition": {
+                        "type": "CUSTOM_FORMULA",
+                        "values": [{"userEnteredValue": f'=${col_letter}{row_start1}="{category_name}"'}],
+                    },
+                    "format": {"backgroundColor": _lightened_rgb(color_hex)},
+                },
+            },
+            "index": index,
         }
     }
 

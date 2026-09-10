@@ -16,6 +16,7 @@ class FakeGoogleSheetsService:
         self.values: dict[str, list[list]] = {}
         self.charts: dict[int, list[int]] = {}
         self._next_chart_id = 1
+        self.conditional_formats: dict[int, int] = {}
         self.spreadsheets: dict[str, str] = {}
         self.shares: list[tuple] = []
 
@@ -81,6 +82,12 @@ class FakeGoogleSheetsService:
                 for sid, ids in self.charts.items():
                     if obj_id in ids:
                         ids.remove(obj_id)
+            if "addConditionalFormatRule" in req:
+                sheet_id = req["addConditionalFormatRule"]["rule"]["ranges"][0]["sheetId"]
+                self.conditional_formats[sheet_id] = self.conditional_formats.get(sheet_id, 0) + 1
+            if "deleteConditionalFormatRule" in req:
+                sheet_id = req["deleteConditionalFormatRule"]["sheetId"]
+                self.conditional_formats[sheet_id] = max(0, self.conditional_formats.get(sheet_id, 0) - 1)
 
     def get_chart_ids(self, spreadsheet_id: str, sheet_id: int) -> list[int]:
         return list(self.charts.get(sheet_id, []))
@@ -88,3 +95,9 @@ class FakeGoogleSheetsService:
     def delete_charts(self, spreadsheet_id: str, chart_ids: list[int]) -> None:
         for sid, ids in self.charts.items():
             self.charts[sid] = [i for i in ids if i not in chart_ids]
+
+    def get_conditional_format_count(self, spreadsheet_id: str, sheet_id: int) -> int:
+        return self.conditional_formats.get(sheet_id, 0)
+
+    def clear_conditional_formats(self, spreadsheet_id: str, sheet_id: int) -> None:
+        self.conditional_formats[sheet_id] = 0

@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.dashboard import calculations as calc
 from app.models import MonthlyPeriod
+from app.repositories.categories import CategoryRepository
 from app.repositories.transactions import TransactionRepository
 from app.sheets import formatting, mapping
 from app.sheets.adapter import GoogleSheetsService
@@ -37,13 +38,33 @@ NOTE = "Auto-generated from the app database - do not edit directly. Edit via th
 TAB_WRITE_PACING_SECONDS = 5.0
 
 
-def format_transactions_header(sheets: GoogleSheetsService, spreadsheet_id: str) -> None:
+def format_transactions_header(session: Session, sheets: GoogleSheetsService, spreadsheet_id: str) -> None:
     sheet_id = sheets.ensure_sheet(spreadsheet_id, "Transactions")
+    num_cols = len(mapping.HEADERS)
     sheets.batch_format(spreadsheet_id, [
-        formatting.bold_header_request(sheet_id, 0, len(mapping.HEADERS)),
+        formatting.bold_header_request(sheet_id, 0, num_cols),
         formatting.freeze_row_request(sheet_id, 1),
-        formatting.currency_format_request(sheet_id, 1, 5000, 5, 6),
+        # Plain number, not currency - this tab is hand-edited, and a ₹-formatted
+        # cell comes back from the Sheets API pre-formatted (e.g. "₹2,000.00"),
+        # which used to fail to parse. See plain_number_format_request's docstring.
+        formatting.plain_number_format_request(sheet_id, 1, 5000, 5, 6),
+        formatting.column_alignment_request(sheet_id, 1, 5000, mapping.COL["Date"], "CENTER"),
+        formatting.column_alignment_request(sheet_id, 1, 5000, mapping.COL["Amount"], "RIGHT"),
+        formatting.column_alignment_request(sheet_id, 1, 5000, mapping.COL["Type"], "CENTER"),
+        formatting.column_alignment_request(sheet_id, 1, 5000, mapping.COL["Month"], "CENTER"),
     ])
+
+    # Conditional format rules accumulate (there's no "replace all" call), so
+    # clear whatever's there before adding the current category set back -
+    # otherwise every sync would pile on a fresh duplicate set of rules.
+    sheets.clear_conditional_formats(spreadsheet_id, sheet_id)
+    categories = CategoryRepository(session).list(include_inactive=True)
+    tint_rules = [
+        formatting.category_row_tint_rule(sheet_id, num_cols, mapping.COL["Category"], cat.name, cat.color_hex, index=i)
+        for i, cat in enumerate(categories)
+    ]
+    if tint_rules:
+        sheets.batch_format(spreadsheet_id, tint_rules)
 
 
 def _rewrite_tab(sheets: GoogleSheetsService, spreadsheet_id: str, tab_name: str, grid: list[list],

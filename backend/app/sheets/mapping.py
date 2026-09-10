@@ -1,5 +1,6 @@
 """Column <-> field mapping and row validation (spec section 6 layout, section 23
 schema validation) for the single canonical `Transactions` tab."""
+import re
 from dataclasses import dataclass
 from datetime import date as date_type, datetime
 from typing import Optional
@@ -46,6 +47,25 @@ def _parse_date(value: str) -> Optional[date_type]:
     return None
 
 
+_CURRENCY_PREFIX = re.compile(r"(?:₹|rs\.?|inr)\s*", re.IGNORECASE)
+
+
+def _parse_amount(value: str) -> Optional[float]:
+    """Strips a currency symbol/prefix (₹, Rs, Rs., INR) and thousands
+    commas before parsing - a row typed directly into the Sheet (rather than
+    through the app) often carries whatever currency formatting Sheets
+    itself adds, e.g. "₹2,000.00". Stripping the prefix as a whole token
+    first (rather than just filtering to digits/./-) avoids "Rs."'s own
+    period being mistaken for the decimal point."""
+    cleaned = _CURRENCY_PREFIX.sub("", value, count=1).replace(",", "").strip()
+    if not cleaned:
+        return None
+    try:
+        return float(cleaned)
+    except ValueError:
+        return None
+
+
 def parse_row(row_number: int, raw: list[str]) -> tuple[Optional[ParsedRow], Optional[RowError]]:
     tid = _cell(raw, COL["Transaction ID"]) or None
 
@@ -59,10 +79,10 @@ def parse_row(row_number: int, raw: list[str]) -> tuple[Optional[ParsedRow], Opt
         return None, RowError(row_number, tid, "Missing description")
 
     amount_str = _cell(raw, COL["Amount"])
-    try:
-        amount = abs(float(amount_str.replace(",", ""))) if amount_str else 0.0
-    except ValueError:
+    parsed_amount = _parse_amount(amount_str) if amount_str else 0.0
+    if parsed_amount is None:
         return None, RowError(row_number, tid, f"Invalid amount: {amount_str!r}")
+    amount = abs(parsed_amount)
     if amount <= 0:
         return None, RowError(row_number, tid, "Amount must be a positive number")
 

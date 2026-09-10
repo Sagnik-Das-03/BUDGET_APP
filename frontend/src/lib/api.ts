@@ -179,5 +179,7 @@ export const api = {
   setSyncInterval: (seconds: number) =>
     request<{ sync_interval_seconds: number }>('/api/sync/interval', { method: 'POST', body: JSON.stringify({ seconds }) }),
   syncNow: () => request('/api/sync/now', { method: 'POST' }),
+  compactSheetNow: () =>
+    request<{ removed_blank: number; reordered: boolean } | { error: string }>('/api/sync/compact', { method: 'POST' }),
   syncLogs: () => request<SyncLogEntry[]>('/api/sync/logs?limit=200'),
 };

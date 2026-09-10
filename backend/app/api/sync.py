@@ -46,6 +46,14 @@ def sync_now():
     return scheduler.run_once()
 
 
+@router.post("/compact")
+def compact_sheet_now():
+    """Cleans up blank rows and re-sorts the Transactions tab by date
+    (newest first) immediately, without waiting for the next scheduled
+    sync - this normally already happens as part of every sync cycle."""
+    return scheduler.run_compact_and_sort_once()
+
+
 @router.get("/logs")
 def logs(limit: int = 100, session: Session = Depends(get_session)):
     entries = SyncRepository(session).recent_logs(limit)

@@ -150,3 +150,24 @@ class GoogleSheetsService:
             return
         requests = [{"deleteEmbeddedObject": {"objectId": cid}} for cid in chart_ids]
         self.batch_format(spreadsheet_id, requests)
+
+    def get_conditional_format_count(self, spreadsheet_id: str, sheet_id: int) -> int:
+        meta = with_retry(lambda: self._sheets.spreadsheets().get(
+            spreadsheetId=spreadsheet_id, fields="sheets(properties.sheetId,conditionalFormats)").execute())
+        for s in meta.get("sheets", []):
+            if s["properties"]["sheetId"] == sheet_id:
+                return len(s.get("conditionalFormats", []))
+        return 0
+
+    def clear_conditional_formats(self, spreadsheet_id: str, sheet_id: int) -> None:
+        """Deletes every existing conditional format rule on this sheet, all
+        by repeatedly targeting index 0 - each delete shifts the next rule
+        down to index 0, so this correctly removes all of them in one batch
+        without needing to compute descending indices. Used before re-adding
+        the category color-tint rules so they don't pile up as duplicates on
+        every sync cycle (Sheets has no "replace all rules" call)."""
+        count = self.get_conditional_format_count(spreadsheet_id, sheet_id)
+        if not count:
+            return
+        requests = [{"deleteConditionalFormatRule": {"sheetId": sheet_id, "index": 0}} for _ in range(count)]
+        self.batch_format(spreadsheet_id, requests)

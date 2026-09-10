@@ -35,6 +35,19 @@ def test_parse_row_accepts_valid_row():
     assert parsed.transaction_id == "TXN-2026-000001"
 
 
+def test_parse_row_accepts_currency_formatted_amount():
+    """Regression test: the Amount column carries a Sheets CURRENCY number
+    format (see sheets/formatting.py, pattern "₹#,##0.00") applied to the
+    whole column - typing a value directly into the Sheet (rather than
+    through the app) picks up that formatting, and reading it back via the
+    Sheets API returns the formatted display string, e.g. "₹2,000.00", not
+    a bare number. This used to fail with "Invalid amount", silently
+    dropping any transaction added straight into the spreadsheet."""
+    parsed, error = mapping.parse_row(2, ["", "2026-09-01", "Rent", "RENT", "Primary", "₹2,000.00", "Expense", "", "", ""])
+    assert error is None
+    assert parsed.amount == 2000.0
+
+
 def test_pull_reports_invalid_rows_without_importing_them(session, sheets):
     sheets.ensure_sheet(SPREADSHEET_ID, "Transactions")
     good_row = mapping.to_row(

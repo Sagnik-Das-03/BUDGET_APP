@@ -26,12 +26,12 @@ class SyncSummary(dict):
     """Plain dict subclass just for a friendlier repr in logs/CLI output."""
 
 
-def _ensure_transactions_sheet(sheets: GoogleSheetsService, spreadsheet_id: str) -> list[list[str]]:
+def _ensure_transactions_sheet(session: Session, sheets: GoogleSheetsService, spreadsheet_id: str) -> list[list[str]]:
     sheets.ensure_sheet(spreadsheet_id, TRANSACTIONS_SHEET)
     raw_rows = sheets.get_rows(spreadsheet_id, TRANSACTIONS_SHEET)
     if not raw_rows:
         sheets.clear_and_write(spreadsheet_id, TRANSACTIONS_SHEET, [mapping.HEADERS])
-        reports_mod.format_transactions_header(sheets, spreadsheet_id)
+        reports_mod.format_transactions_header(session, sheets, spreadsheet_id)
         return [mapping.HEADERS]
     return raw_rows
 
@@ -111,6 +111,46 @@ def clear_sheet_rows(sheets: GoogleSheetsService, spreadsheet_id: str, transacti
     return len(updates)
 
 
+def compact_and_sort(session: Session, sheets: GoogleSheetsService, spreadsheet_id: str) -> dict:
+    """Removes fully-blank rows (left behind by clear_sheet_rows() after a
+    permanent delete) and re-sorts the remaining rows by date, newest first.
+    Purely a tidiness pass on the Sheet - row position was never meaningful
+    to any lookup (pull()/push() always match by transaction_id, never row
+    number), so rewriting the tab in a new order here is always safe. A row
+    whose date can't be parsed (already flagged as an error during pull(),
+    left untouched rather than dropped) is kept, sorted after every dated
+    row, so it stays visible instead of silently disappearing.
+
+    Runs every cycle regardless of data_changed (unlike report regeneration)
+    since a permanent delete - the only thing that actually creates a blank
+    row - happens synchronously in its own endpoint, not through pull()/
+    push(), so it wouldn't otherwise be noticed here. The read is cheap;
+    the actual rewrite only happens when there's something to remove or
+    reorder, to avoid burning write quota on a no-op cycle."""
+    raw_rows = sheets.get_rows(spreadsheet_id, TRANSACTIONS_SHEET)
+    if len(raw_rows) <= 1:
+        return {"removed_blank": 0, "reordered": False}
+
+    data_rows = raw_rows[1:]
+    non_blank = [r for r in data_rows if any((c or "").strip() for c in r)]
+    removed = len(data_rows) - len(non_blank)
+
+    def row_date(row: list[str]):
+        parsed, error = mapping.parse_row(0, row)
+        return None if error else parsed.date
+
+    dated = [(row_date(r), r) for r in non_blank]
+    with_date = sorted(((d, r) for d, r in dated if d is not None), key=lambda item: item[0])
+    without_date = [r for d, r in dated if d is None]
+    final_rows = [r for _, r in reversed(with_date)] + without_date
+
+    reordered = final_rows != non_blank
+    if removed or reordered:
+        sheets.clear_and_write(spreadsheet_id, TRANSACTIONS_SHEET, [mapping.HEADERS] + final_rows)
+        reports_mod.format_transactions_header(session, sheets, spreadsheet_id)
+    return {"removed_blank": removed, "reordered": reordered}
+
+
 def push(session: Session, sheets: GoogleSheetsService, spreadsheet_id: str,
          id_to_row_number: dict[str, int]) -> dict:
     tx_repo = TransactionRepository(session)
@@ -148,10 +188,10 @@ def push(session: Session, sheets: GoogleSheetsService, spreadsheet_id: str,
 
 def run_sync_cycle(session: Session, sheets: GoogleSheetsService, spreadsheet_id: str) -> SyncSummary:
     sync_repo = SyncRepository(session)
-    summary = SyncSummary(pull=None, push=None, periods_discovered=[], reports=None, errors=[])
+    summary = SyncSummary(pull=None, push=None, compact=None, periods_discovered=[], reports=None, errors=[])
 
     try:
-        raw_rows = _ensure_transactions_sheet(sheets, spreadsheet_id)
+        raw_rows = _ensure_transactions_sheet(session, sheets, spreadsheet_id)
         pull_result = pull(session, sheets, spreadsheet_id, raw_rows)
         summary["pull"] = pull_result["counts"]
     except Exception as e:
@@ -169,6 +209,14 @@ def run_sync_cycle(session: Session, sheets: GoogleSheetsService, spreadsheet_id
         sync_repo.log(f"Push failed: {e}", LogLevel.error)
         session.commit()
         summary["errors"].append(f"push: {e}")
+
+    try:
+        summary["compact"] = compact_and_sort(session, sheets, spreadsheet_id)
+    except Exception as e:
+        logger.exception("sheet compaction/sort failed")
+        sync_repo.log(f"Sheet compaction failed: {e}", LogLevel.error)
+        session.commit()
+        summary["errors"].append(f"compact: {e}")
 
     try:
         periods_mod.ensure_periods_for_transactions(session)
@@ -212,8 +260,12 @@ def run_sync_cycle(session: Session, sheets: GoogleSheetsService, spreadsheet_id
     # something added outside the app - the mobile quick-add form, a manual sheet
     # edit) - but a cycle that finds and pushes nothing doesn't need to log
     # "complete" every time either; that was drowning real activity in noise on
-    # the Logs page. Errors always log, changed or not.
-    if data_changed or summary["errors"]:
+    # the Logs page. Errors always log, changed or not. A compaction pass that
+    # actually removed or reordered rows counts as activity too, even though
+    # it never touches the DB and so doesn't warrant regenerating reports.
+    compact_result = summary.get("compact") or {}
+    compact_changed = compact_result.get("removed_blank", 0) > 0 or compact_result.get("reordered", False)
+    if data_changed or compact_changed or summary["errors"]:
         level = LogLevel.error if summary["errors"] else LogLevel.info
         sync_repo.log(f"Sync cycle complete: {dict(summary)}", level)
     session.commit()
