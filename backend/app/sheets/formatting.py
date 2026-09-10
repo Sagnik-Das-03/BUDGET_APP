@@ -11,15 +11,6 @@ def _hex_to_rgb(hex_color: str) -> dict:
     return {"red": int(h[0:2], 16) / 255, "green": int(h[2:4], 16) / 255, "blue": int(h[4:6], 16) / 255}
 
 
-def _lightened_rgb(hex_color: str, toward_white: float = 0.82) -> dict:
-    """A category's full chart color (e.g. RENT's saturated rose) makes a
-    fine small swatch but is overwhelming as a whole-row background - this
-    blends it most of the way toward white first, for a soft tint instead
-    of a loud block of color."""
-    rgb = _hex_to_rgb(hex_color)
-    return {k: v + (1 - v) * toward_white for k, v in rgb.items()}
-
-
 def bold_header_request(sheet_id: int, row0: int, num_cols: int) -> dict:
     return {
         "repeatCell": {
@@ -82,6 +73,21 @@ def plain_number_format_request(sheet_id: int, row_start0: int, row_end0: int, c
     }
 
 
+def data_row_text_color_request(sheet_id: int, num_cols: int, row_start0: int = 1, row_end0: int = 5000) -> dict:
+    """Forces data-row text to plain black (INK), so it stays readable
+    regardless of whatever the text color happened to default to - a
+    manually-typed row can inherit odd formatting from wherever it was
+    typed or pasted from."""
+    return {
+        "repeatCell": {
+            "range": {"sheetId": sheet_id, "startRowIndex": row_start0, "endRowIndex": row_end0,
+                      "startColumnIndex": 0, "endColumnIndex": num_cols},
+            "cell": {"userEnteredFormat": {"textFormat": {"foregroundColor": INK}}},
+            "fields": "userEnteredFormat.textFormat.foregroundColor",
+        }
+    }
+
+
 def column_alignment_request(sheet_id: int, row_start0: int, row_end0: int, col0: int, alignment: str) -> dict:
     """alignment: "LEFT" | "CENTER" | "RIGHT"."""
     return {
@@ -90,37 +96,6 @@ def column_alignment_request(sheet_id: int, row_start0: int, row_end0: int, col0
                       "startColumnIndex": col0, "endColumnIndex": col0 + 1},
             "cell": {"userEnteredFormat": {"horizontalAlignment": alignment}},
             "fields": "userEnteredFormat.horizontalAlignment",
-        }
-    }
-
-
-def category_row_tint_rule(sheet_id: int, num_cols: int, category_col0: int, category_name: str,
-                            color_hex: str, index: int, row_start1: int = 2, row_end0: int = 5000) -> dict:
-    """Tints an entire data row with a soft, lightened version of its own
-    category's chart color, so the Transactions tab visually matches the
-    app's own category color-coding - a conditional format rule (not a
-    one-off cell color) so it applies automatically to every row with that
-    category, including ones typed straight into the Sheet, without needing
-    to be reapplied by hand or re-run per row on every sync. category_col0
-    is 0-indexed; the custom formula below turns it into the matching A1
-    column letter to check that column while coloring the whole row."""
-    col_letter = chr(ord("A") + category_col0)
-    return {
-        "addConditionalFormatRule": {
-            "rule": {
-                "ranges": [{
-                    "sheetId": sheet_id, "startRowIndex": row_start1 - 1, "endRowIndex": row_end0,
-                    "startColumnIndex": 0, "endColumnIndex": num_cols,
-                }],
-                "booleanRule": {
-                    "condition": {
-                        "type": "CUSTOM_FORMULA",
-                        "values": [{"userEnteredValue": f'=${col_letter}{row_start1}="{category_name}"'}],
-                    },
-                    "format": {"backgroundColor": _lightened_rgb(color_hex)},
-                },
-            },
-            "index": index,
         }
     }
 

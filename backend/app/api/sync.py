@@ -1,3 +1,5 @@
+from datetime import timezone
+
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -12,6 +14,10 @@ router = APIRouter(prefix="/api/sync", tags=["sync"])
 
 class IntervalIn(BaseModel):
     seconds: int = Field(ge=1)
+
+
+class SortDirectionIn(BaseModel):
+    descending: bool
 
 
 @router.get("/status")
@@ -29,6 +35,7 @@ def config():
         "sync_interval_seconds": scheduler.get_interval(),
         "sync_interval_default": settings.sync_interval_seconds,
         "sync_interval_min": scheduler.MIN_INTERVAL_SECONDS,
+        "sheet_sort_descending": scheduler.get_sort_descending(),
     }
 
 
@@ -46,6 +53,15 @@ def sync_now():
     return scheduler.run_once()
 
 
+@router.post("/sort_direction")
+def set_sort_direction(payload: SortDirectionIn):
+    """Sets which direction the Transactions tab is kept sorted in on every
+    sync (and by the "Clean Up & Sort Sheet Now" button) - newest first
+    (descending, the default) or oldest first (ascending)."""
+    effective = scheduler.set_sort_descending(payload.descending)
+    return {"sheet_sort_descending": effective}
+
+
 @router.post("/compact")
 def compact_sheet_now():
     """Cleans up blank rows and re-sorts the Transactions tab by date
@@ -58,7 +74,12 @@ def compact_sheet_now():
 def logs(limit: int = 100, session: Session = Depends(get_session)):
     entries = SyncRepository(session).recent_logs(limit)
     return [
-        {"timestamp": e.timestamp.isoformat(), "level": e.level.value if hasattr(e.level, "value") else e.level,
-         "message": e.message}
+        # SyncLog.timestamp comes back from SQLite's CURRENT_TIMESTAMP as a
+        # naive datetime - it IS UTC, but with no "Z"/offset marker, so the
+        # frontend's `new Date(...)` would otherwise assume it's already
+        # local time and display it unconverted, off by the browser's UTC
+        # offset. Attaching UTC tzinfo here makes the ISO string explicit.
+        {"timestamp": e.timestamp.replace(tzinfo=timezone.utc).isoformat(),
+         "level": e.level.value if hasattr(e.level, "value") else e.level, "message": e.message}
         for e in entries
     ]

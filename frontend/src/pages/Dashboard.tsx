@@ -7,7 +7,6 @@ import type { RangeKey } from '../lib/types';
 import { RangeToggle } from '../components/RangeToggle';
 import { MetricsRow } from '../components/MetricsRow';
 import { AlertBanner } from '../components/AlertBanner';
-import { ForecastCard } from '../components/ForecastCard';
 import { KpiRow, type KpiTileData } from '../components/KpiRow';
 import { TrendChart } from '../components/TrendChart';
 import { CategoryChart } from '../components/CategoryChart';
@@ -250,7 +249,6 @@ export function Dashboard() {
       </div>
 
       <AlertBanner alerts={alerts.data} />
-      <ForecastCard range={effectiveRange} dateBounds={effectiveBounds} />
       <MetricsRow highlights={highlights.data} />
       <KpiRow tiles={tiles} />
 

@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { ColorSwatchInput } from '@/components/ColorSwatchInput';
 
 export function Settings() {
@@ -39,6 +40,11 @@ export function Settings() {
     onSuccess: () => invalidate('syncConfig'),
   });
 
+  const setSortDirection = useMutation({
+    mutationFn: (descending: boolean) => api.setSheetSortDirection(descending),
+    onSuccess: () => invalidate('syncConfig'),
+  });
+
   const compactSheet = useMutation({ mutationFn: () => api.compactSheetNow() });
   const compactMessage = (() => {
     const r = compactSheet.data;
@@ -47,7 +53,7 @@ export function Settings() {
     if (!r.removed_blank && !r.reordered) return 'Already tidy — nothing to clean up or reorder.';
     const parts = [];
     if (r.removed_blank) parts.push(`removed ${r.removed_blank} blank row${r.removed_blank === 1 ? '' : 's'}`);
-    if (r.reordered) parts.push('re-sorted by date (newest first)');
+    if (r.reordered) parts.push(`re-sorted by date (${config.data?.sheet_sort_descending === false ? 'oldest' : 'newest'} first)`);
     return parts.join(', ') + '.';
   })();
 
@@ -150,12 +156,23 @@ export function Settings() {
           </span>
         </CardContent>
         <CardContent className="flex flex-wrap items-center gap-2.5 border-t pt-4">
+          <Label className="text-sm">Sort by date</Label>
+          <ToggleGroup
+            type="single"
+            variant="outline"
+            size="sm"
+            value={config.data?.sheet_sort_descending === false ? 'asc' : 'desc'}
+            onValueChange={(v) => v && setSortDirection.mutate(v === 'desc')}
+          >
+            <ToggleGroupItem value="desc" className="px-2.5 text-xs">Newest First</ToggleGroupItem>
+            <ToggleGroupItem value="asc" className="px-2.5 text-xs">Oldest First</ToggleGroupItem>
+          </ToggleGroup>
           <Button size="sm" variant="outline" disabled={compactSheet.isPending} onClick={() => compactSheet.mutate()}>
             {compactSheet.isPending ? 'Cleaning up…' : 'Clean Up & Sort Sheet Now'}
           </Button>
-          <span className="text-xs text-muted-foreground">
-            Removes blank rows (left behind by a permanent delete) and re-sorts the Transactions tab by date,
-            newest first. This already happens automatically on every sync — use this to see it right away.
+          <span className="w-full text-xs text-muted-foreground">
+            Removes blank rows (left behind by a permanent delete) and re-sorts the Transactions tab by date in the
+            direction above. This already happens automatically on every sync — use the button to see it right away.
           </span>
           {compactMessage && <span className="w-full text-xs text-muted-foreground">{compactMessage}</span>}
         </CardContent>

@@ -1,6 +1,6 @@
 import type {
   Account, AskResponse, Budget, BudgetAlert, BudgetVsActual, Category, CategoryDrilldownNode,
-  CategoryTotal, CategoryTrend, CategoryVolatility, ChartPalette, ConflictRow, EssentialSplit, Forecast, Highlights,
+  CategoryTotal, CategoryTrend, CategoryVolatility, ChartPalette, ConflictRow, EssentialSplit, Highlights,
   ImportCommitResult, ImportPreviewResult, ImportRowIn, Insight, LlmStatus, MonthlyBreakdownRow, QuickAddResult,
   SavingsGoalProgress, SavingsStreak, SpendConcentration, SpendingPattern, SyncConfig, SyncLogEntry, SyncStatus,
   Totals, Transaction, TrashedTransaction, TrendForRange, ViewFilters,
@@ -56,8 +56,6 @@ export const api = {
   budgetVsActual: () => request<BudgetVsActual[]>('/api/dashboard/budget_vs_actual'),
   monthlyBreakdown: () => request<MonthlyBreakdownRow[]>('/api/dashboard/monthly_breakdown'),
   budgetAlerts: () => request<BudgetAlert[]>('/api/dashboard/budget_alerts'),
-  forecast: (range: string, dateBounds?: DateBounds) =>
-    request<Forecast>(`/api/dashboard/forecast${qs({ range, ...dateBounds })}`),
   categoryTrends: (range: string, type = 'Expense', dateBounds?: DateBounds) =>
     request<CategoryTrend[]>(`/api/dashboard/category_trends${qs({ range, type, ...dateBounds })}`),
   categoryVolatility: (months = 6) =>
@@ -179,6 +177,8 @@ export const api = {
   setSyncInterval: (seconds: number) =>
     request<{ sync_interval_seconds: number }>('/api/sync/interval', { method: 'POST', body: JSON.stringify({ seconds }) }),
   syncNow: () => request('/api/sync/now', { method: 'POST' }),
+  setSheetSortDirection: (descending: boolean) =>
+    request<{ sheet_sort_descending: boolean }>('/api/sync/sort_direction', { method: 'POST', body: JSON.stringify({ descending }) }),
   compactSheetNow: () =>
     request<{ removed_blank: number; reordered: boolean } | { error: string }>('/api/sync/compact', { method: 'POST' }),
   syncLogs: () => request<SyncLogEntry[]>('/api/sync/logs?limit=200'),

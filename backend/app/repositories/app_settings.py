@@ -5,6 +5,7 @@ from typing import Optional
 from app.models import AppSetting
 
 SYNC_INTERVAL_KEY = "sync_interval_seconds"
+SHEET_SORT_DIRECTION_KEY = "sheet_sort_direction"  # "desc" (default, newest first) or "asc"
 
 
 class AppSettingRepository:

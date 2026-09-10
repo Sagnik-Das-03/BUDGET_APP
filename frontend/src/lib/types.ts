@@ -154,15 +154,6 @@ export interface Budget {
   goal_amount: number;
 }
 
-export interface CategoryPace {
-  category: string;
-  goal: number;
-  actual: number;
-  projected: number;
-  pct: number;
-  status: 'on_track' | 'watch' | 'over';
-}
-
 export interface CategoryTrend {
   category: string;
   current: number;
@@ -218,22 +209,6 @@ export interface SpendConcentration {
   total: number;
   pct: number;
   transaction_count: number;
-}
-
-export interface Forecast {
-  range: string;
-  supported: boolean;
-  is_current: boolean;
-  days_elapsed: number;
-  days_in_period: number;
-  income_so_far: number;
-  expenses_so_far: number;
-  net_so_far: number;
-  projected_income: number;
-  projected_expenses: number;
-  projected_net: number;
-  projected_savings_rate: number;
-  category_pace: CategoryPace[];
 }
 
 export interface SavingsGoalProgress {
@@ -326,4 +301,5 @@ export interface SyncConfig {
   sync_interval_seconds: number;
   sync_interval_default: number;
   sync_interval_min: number;
+  sheet_sort_descending: boolean;
 }

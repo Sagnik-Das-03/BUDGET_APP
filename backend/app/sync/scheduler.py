@@ -10,7 +10,7 @@ from googleapiclient.errors import HttpError
 
 from app.config import settings
 from app.db import session_scope
-from app.repositories.app_settings import SYNC_INTERVAL_KEY, AppSettingRepository
+from app.repositories.app_settings import SHEET_SORT_DIRECTION_KEY, SYNC_INTERVAL_KEY, AppSettingRepository
 from app.repositories.categories import CategoryRepository
 from app.repositories.accounts import AccountRepository
 from app.sheets.adapter import GoogleSheetsService
@@ -47,6 +47,7 @@ _status = {
 _scheduler: Optional[BackgroundScheduler] = None
 _active_spreadsheet_id: Optional[str] = None  # resolved lazily: settings value, or one this process created
 _current_interval: int = settings.sync_interval_seconds  # overridden from DB (if set) in start()
+_current_sort_descending: bool = True  # overridden from DB (if set) in start()
 
 
 def get_status() -> dict:
@@ -119,7 +120,7 @@ def run_once() -> dict:
         with session_scope() as session:
             CategoryRepository(session).ensure_defaults()
             AccountRepository(session).ensure_default()
-            summary = run_sync_cycle(session, sheets, spreadsheet_id)
+            summary = run_sync_cycle(session, sheets, spreadsheet_id, sort_descending=_current_sort_descending)
         ok = not summary.get("errors")
         _set_status(
             state="idle" if ok else "error",
@@ -137,11 +138,11 @@ def run_once() -> dict:
 
 
 def run_compact_and_sort_once() -> dict:
-    """Runs just the Sheet tidy-up pass (blank-row cleanup, date-descending
-    sort, category color-tint refresh) on demand, without waiting for the
-    next full sync cycle - for the "Clean up & Sort Sheet Now" button in
-    Settings. Shares _sync_lock with run_once() so it can't run concurrently
-    with (or be raced by) a real pull/push cycle."""
+    """Runs just the Sheet tidy-up pass (blank-row cleanup, date sort) on
+    demand, without waiting for the next full sync cycle - for the "Clean
+    Up & Sort Sheet Now" button in Settings. Shares _sync_lock with
+    run_once() so it can't run concurrently with (or be raced by) a real
+    pull/push cycle."""
     if not settings.credentials_configured:
         return {"error": "Google credentials not configured yet - see docs/service_account_setup.md"}
     if not _sync_lock.acquire(blocking=False):
@@ -149,8 +150,7 @@ def run_compact_and_sort_once() -> dict:
     try:
         sheets = _sheets_client()
         spreadsheet_id = _resolve_spreadsheet_id(sheets)
-        with session_scope() as session:
-            return compact_and_sort(session, sheets, spreadsheet_id)
+        return compact_and_sort(sheets, spreadsheet_id, descending=_current_sort_descending)
     except Exception as e:
         logger.exception("manual sheet compaction crashed")
         return {"error": str(e)}
@@ -177,8 +177,24 @@ def set_interval(seconds: int) -> int:
     return seconds
 
 
+def get_sort_descending() -> bool:
+    return _current_sort_descending
+
+
+def set_sort_descending(descending: bool) -> bool:
+    """Overrides the Transactions tab's sort direction at runtime - persists
+    to the DB so it survives restarts. Takes effect on the next sync/compact
+    pass, not retroactively (it doesn't re-sort the sheet itself)."""
+    global _current_sort_descending
+    with session_scope() as session:
+        AppSettingRepository(session).set(SHEET_SORT_DIRECTION_KEY, "desc" if descending else "asc")
+    _current_sort_descending = descending
+    logger.info("Sheet sort direction changed to %s", "descending (newest first)" if descending else "ascending (oldest first)")
+    return descending
+
+
 def start() -> None:
-    global _scheduler, _current_interval
+    global _scheduler, _current_interval, _current_sort_descending
     if _scheduler is not None:
         return
     if settings.credentials_configured:
@@ -186,7 +202,9 @@ def start() -> None:
 
     with session_scope() as session:
         override = AppSettingRepository(session).get(SYNC_INTERVAL_KEY)
+        sort_override = AppSettingRepository(session).get(SHEET_SORT_DIRECTION_KEY)
     _current_interval = max(int(override), MIN_INTERVAL_SECONDS) if override else settings.sync_interval_seconds
+    _current_sort_descending = sort_override != "asc"
 
     _scheduler = BackgroundScheduler(daemon=True)
     _scheduler.add_job(run_once, "interval", seconds=_current_interval,

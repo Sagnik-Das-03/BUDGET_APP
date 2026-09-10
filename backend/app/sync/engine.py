@@ -31,7 +31,7 @@ def _ensure_transactions_sheet(session: Session, sheets: GoogleSheetsService, sp
     raw_rows = sheets.get_rows(spreadsheet_id, TRANSACTIONS_SHEET)
     if not raw_rows:
         sheets.clear_and_write(spreadsheet_id, TRANSACTIONS_SHEET, [mapping.HEADERS])
-        reports_mod.format_transactions_header(session, sheets, spreadsheet_id)
+        reports_mod.format_transactions_header(sheets, spreadsheet_id)
         return [mapping.HEADERS]
     return raw_rows
 
@@ -111,22 +111,31 @@ def clear_sheet_rows(sheets: GoogleSheetsService, spreadsheet_id: str, transacti
     return len(updates)
 
 
-def compact_and_sort(session: Session, sheets: GoogleSheetsService, spreadsheet_id: str) -> dict:
+def compact_and_sort(sheets: GoogleSheetsService, spreadsheet_id: str, descending: bool = True) -> dict:
     """Removes fully-blank rows (left behind by clear_sheet_rows() after a
-    permanent delete) and re-sorts the remaining rows by date, newest first.
-    Purely a tidiness pass on the Sheet - row position was never meaningful
-    to any lookup (pull()/push() always match by transaction_id, never row
-    number), so rewriting the tab in a new order here is always safe. A row
-    whose date can't be parsed (already flagged as an error during pull(),
-    left untouched rather than dropped) is kept, sorted after every dated
-    row, so it stays visible instead of silently disappearing.
+    permanent delete) and re-sorts the remaining rows by date - newest first
+    by default (descending=True), oldest first if False (see Settings' sort
+    direction control). Purely a tidiness pass on the Sheet - row position
+    was never meaningful to any lookup (pull()/push() always match by
+    transaction_id, never row number), so rewriting the tab in a new order
+    here is always safe. A row whose date can't be parsed (already flagged
+    as an error during pull(), left untouched rather than dropped) is kept,
+    sorted after every dated row regardless of direction, so it stays
+    visible instead of silently disappearing.
 
     Runs every cycle regardless of data_changed (unlike report regeneration)
     since a permanent delete - the only thing that actually creates a blank
     row - happens synchronously in its own endpoint, not through pull()/
     push(), so it wouldn't otherwise be noticed here. The read is cheap;
-    the actual rewrite only happens when there's something to remove or
-    reorder, to avoid burning write quota on a no-op cycle."""
+    the full-tab rewrite only happens when there's something to remove or
+    reorder, to avoid burning write quota on a no-op cycle - but clearing
+    conditional formatting is checked and (if needed) done unconditionally
+    every cycle regardless of that, since otherwise a sheet that's already
+    compact and sorted would never have a chance to sweep away leftover
+    formatting (e.g. the row color-tinting this tab briefly did)."""
+    sheet_id = sheets.ensure_sheet(spreadsheet_id, TRANSACTIONS_SHEET)
+    sheets.clear_conditional_formats(spreadsheet_id, sheet_id)
+
     raw_rows = sheets.get_rows(spreadsheet_id, TRANSACTIONS_SHEET)
     if len(raw_rows) <= 1:
         return {"removed_blank": 0, "reordered": False}
@@ -140,14 +149,15 @@ def compact_and_sort(session: Session, sheets: GoogleSheetsService, spreadsheet_
         return None if error else parsed.date
 
     dated = [(row_date(r), r) for r in non_blank]
-    with_date = sorted(((d, r) for d, r in dated if d is not None), key=lambda item: item[0])
+    with_date = sorted(((d, r) for d, r in dated if d is not None),
+                        key=lambda item: item[0], reverse=descending)
     without_date = [r for d, r in dated if d is None]
-    final_rows = [r for _, r in reversed(with_date)] + without_date
+    final_rows = [r for _, r in with_date] + without_date
 
     reordered = final_rows != non_blank
     if removed or reordered:
         sheets.clear_and_write(spreadsheet_id, TRANSACTIONS_SHEET, [mapping.HEADERS] + final_rows)
-        reports_mod.format_transactions_header(session, sheets, spreadsheet_id)
+        reports_mod.format_transactions_header(sheets, spreadsheet_id)
     return {"removed_blank": removed, "reordered": reordered}
 
 
@@ -186,7 +196,8 @@ def push(session: Session, sheets: GoogleSheetsService, spreadsheet_id: str,
     return {"pushed": len(to_mark_synced), "updated": len(updates), "appended": len(appends)}
 
 
-def run_sync_cycle(session: Session, sheets: GoogleSheetsService, spreadsheet_id: str) -> SyncSummary:
+def run_sync_cycle(session: Session, sheets: GoogleSheetsService, spreadsheet_id: str,
+                    sort_descending: bool = True) -> SyncSummary:
     sync_repo = SyncRepository(session)
     summary = SyncSummary(pull=None, push=None, compact=None, periods_discovered=[], reports=None, errors=[])
 
@@ -211,7 +222,7 @@ def run_sync_cycle(session: Session, sheets: GoogleSheetsService, spreadsheet_id
         summary["errors"].append(f"push: {e}")
 
     try:
-        summary["compact"] = compact_and_sort(session, sheets, spreadsheet_id)
+        summary["compact"] = compact_and_sort(sheets, spreadsheet_id, descending=sort_descending)
     except Exception as e:
         logger.exception("sheet compaction/sort failed")
         sync_repo.log(f"Sheet compaction failed: {e}", LogLevel.error)

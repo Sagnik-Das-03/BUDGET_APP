@@ -163,9 +163,11 @@ class GoogleSheetsService:
         """Deletes every existing conditional format rule on this sheet, all
         by repeatedly targeting index 0 - each delete shifts the next rule
         down to index 0, so this correctly removes all of them in one batch
-        without needing to compute descending indices. Used before re-adding
-        the category color-tint rules so they don't pile up as duplicates on
-        every sync cycle (Sheets has no "replace all rules" call)."""
+        without needing to compute descending indices. Used by
+        format_transactions_header() to sweep away any conditional
+        formatting left over from earlier (Sheets has no "replace all
+        rules" call, so the only way to guarantee none remain is to delete
+        whatever's there)."""
         count = self.get_conditional_format_count(spreadsheet_id, sheet_id)
         if not count:
             return

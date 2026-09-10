@@ -20,9 +20,8 @@ interface SpendingPatternCardProps {
 }
 
 // Pure descriptive breakdown of WHEN expense spending happens within a week
-// and within a month - no AI, no threshold. Explains, for example, why an
-// early-month "at this pace" forecast can overshoot if spending is
-// naturally front-loaded, or surfaces a "weekend spender" pattern.
+// and within a month - no AI, no threshold. Surfaces things like a
+// "weekend spender" pattern or spending front-loaded early in the month.
 export function SpendingPatternCard({ range, dateBounds }: SpendingPatternCardProps) {
   const isDark = useIsDark();
   const t = chartTheme(isDark);

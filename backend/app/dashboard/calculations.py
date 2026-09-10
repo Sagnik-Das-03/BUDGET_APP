@@ -346,88 +346,6 @@ def budget_alerts(session: Session, period_key: str, warning_threshold: float = 
     return alerts
 
 
-def forecast(session: Session, range_key: str = "this_month", date_from: Optional[date_type] = None,
-             date_to: Optional[date_type] = None, as_of: Optional[date_type] = None) -> dict:
-    """Projects a range's totals (and, for this_month, each budgeted
-    category's spend) to the range's end by extrapolating the current daily
-    pace: amount-so-far divided by days elapsed so far, multiplied by the
-    range's total length. A naive but transparent projection - it has no idea
-    a big recurring bill lands on the 28th, it just assumes money keeps
-    flowing in/out at the same average rate it has so far.
-
-    range_key is one of "this_week"/"this_month"/"this_year" (a fixed
-    calendar period) or "custom" (caller-supplied date_from/date_to, e.g. a
-    drilled-into month on the Dashboard) - "all_time" has no end to project
-    toward, so it comes back with supported=False rather than a number that
-    would just be misleading.
-
-    Category budget pacing only applies to range_key="this_month" since
-    goals are stored per-month (see BudgetRepository) - a week or year has
-    no natural budget of its own to pace against.
-
-    Only meaningful for a range currently in progress (is_current=True); for
-    a fully-elapsed past range, days_elapsed is clamped to the range's full
-    length, so pace collapses to 1x and the 'projected' figures just equal
-    the final actuals - callers should treat that as a signal to hide/relabel
-    the forecast rather than show it as a live prediction."""
-    if range_key == "all_time":
-        return {
-            "range": "all_time", "supported": False, "is_current": False,
-            "days_elapsed": 0, "days_in_period": 0,
-            "income_so_far": 0.0, "expenses_so_far": 0.0, "net_so_far": 0.0,
-            "projected_income": 0.0, "projected_expenses": 0.0, "projected_net": 0.0,
-            "projected_savings_rate": 0.0, "category_pace": [],
-        }
-
-    if range_key == "custom":
-        if not date_from or not date_to:
-            raise ValueError("range='custom' requires both date_from and date_to")
-        p_start, p_end = date_from, date_to
-    else:
-        range_fn = {"this_week": range_this_week, "this_month": range_this_month, "this_year": range_this_year}
-        p_start, p_end = range_fn.get(range_key, range_this_month)(as_of)
-
-    today = as_of or date_type.today()
-    days_in_period = (p_end - p_start).days + 1
-    is_current = p_start <= today <= p_end
-    counted_through = min(max(today, p_start), p_end)
-    days_elapsed = (counted_through - p_start).days + 1
-    pace = days_in_period / days_elapsed
-
-    t = totals(session, p_start, counted_through)
-    projected_income = round(t["income"] * pace, 2)
-    projected_expenses = round(t["expenses"] * pace, 2)
-    projected_net = round(projected_income - projected_expenses, 2)
-    projected_savings_rate = round(projected_net / projected_income, 4) if projected_income else 0.0
-
-    category_pace = []
-    if range_key == "this_month":
-        goals = BudgetRepository(session).for_period(period_key_for(p_start))
-        actuals = {row["category"]: row["total"] for row in by_category(
-            session, date_from=p_start, date_to=counted_through, transaction_type="Expense")}
-        for cat, goal in goals.items():
-            if goal <= 0:
-                continue
-            actual = actuals.get(cat, 0.0)
-            projected = round(actual * pace, 2)
-            pct = projected / goal
-            status = "over" if pct >= 1.0 else "watch" if pct >= 0.9 else "on_track"
-            category_pace.append({
-                "category": cat, "goal": goal, "actual": round(actual, 2),
-                "projected": projected, "pct": round(pct, 4), "status": status,
-            })
-        category_pace.sort(key=lambda r: -r["pct"])
-
-    return {
-        "range": range_key, "supported": True, "is_current": is_current,
-        "days_elapsed": days_elapsed, "days_in_period": days_in_period,
-        "income_so_far": t["income"], "expenses_so_far": t["expenses"], "net_so_far": t["net"],
-        "projected_income": projected_income, "projected_expenses": projected_expenses,
-        "projected_net": projected_net, "projected_savings_rate": projected_savings_rate,
-        "category_pace": category_pace,
-    }
-
-
 def detect_anomalies(session: Session, date_from: Optional[date_type], date_to: Optional[date_type],
                       min_multiple: float = 2.0, min_absolute_gap: float = 100.0,
                       min_history: int = 3, limit: int = 5) -> list[dict]:
@@ -530,10 +448,9 @@ def spending_pattern(session: Session, date_from: Optional[date_type] = None,
                       date_to: Optional[date_type] = None) -> dict:
     """Where expense spending concentrates within a week (which day of the
     week) and within a month (which third of it) - a purely descriptive
-    breakdown, no threshold or judgment involved. Explains, for example, why
-    an early-month 'at this pace' forecast often overshoots if spending is
-    naturally front-loaded (rent/bills on the 1st), and can surface a
-    'weekend spender' pattern that a category-only view wouldn't show."""
+    breakdown, no threshold or judgment involved. Can surface a 'weekend
+    spender' pattern or spending naturally front-loaded early in the month
+    (rent/bills on the 1st) that a category-only view wouldn't show."""
     by_dow = {name: 0.0 for name in _DAY_NAMES}
     by_third = {"1st (days 1-10)": 0.0, "2nd (days 11-20)": 0.0, "3rd (days 21+)": 0.0}
     total = 0.0
