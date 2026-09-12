@@ -46,11 +46,14 @@ class UserStatOut(BaseModel):
     is_active: bool
     db_size_bytes: int
     transaction_count: int
+    has_password: bool
 
 
 class UserStatsOut(BaseModel):
     total_users: int
     total_size_bytes: int
+    total_transactions: int
+    users_with_password: int
     users: list[UserStatOut]
 
 
@@ -97,9 +100,13 @@ def user_stats():
         out.append(UserStatOut(
             username=u["username"], is_active=u["username"] == active,
             db_size_bytes=db_file_size(u["db_file"]), transaction_count=count,
+            has_password=bool(u.get("password_hash")),
         ))
     return UserStatsOut(
-        total_users=len(out), total_size_bytes=sum(u.db_size_bytes for u in out), users=out,
+        total_users=len(out), total_size_bytes=sum(u.db_size_bytes for u in out),
+        total_transactions=sum(u.transaction_count for u in out),
+        users_with_password=sum(1 for u in out if u.has_password),
+        users=out,
     )
 
 
@@ -139,8 +146,14 @@ def activate_user(username: str, payload: ActivateIn = ActivateIn()):
         raise HTTPException(404, f"User {username!r} not found")
     if not registry.verify_password(username, payload.password or ""):
         raise HTTPException(403, "Incorrect password")
-    switch_active_db(db_file)
+    # Registry updated BEFORE switching the live engine: switch_active_db()
+    # triggers scheduler.reload_for_active_user(), which reads
+    # registry.get_active() to decide things like the legacy-spreadsheet-id
+    # migration - if that still pointed at the OLD user, the new user's
+    # settings would load incorrectly (this was a real bug: the migration
+    # silently never fired when switching via this endpoint).
     registry.set_active(username)
+    switch_active_db(db_file)
     return UserOut(
         username=username, is_active=True, db_size_bytes=db_file_size(db_file),
         has_password=registry.has_password(username),

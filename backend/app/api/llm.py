@@ -20,8 +20,19 @@ from app.schemas import (
     ChatFeedbackIn, ChatMessageOut, ChatThreadOut, CompareRecapIn, CompareRecapOut, InsightOut,
     QuickAddIn, QuickAddOut, SuggestViewNameIn, SuggestViewNameOut,
 )
+from app.user_registry import registry
 
 router = APIRouter(prefix="/api/llm", tags=["llm"])
+
+
+def _active_username() -> str:
+    """Whoever's data this request is actually running against - each user
+    is a fully separate database, so this is always correct for the request
+    being served, never stale/cached from a previous switch. Given to the
+    model as a plain fact (e.g. "The user's name is Sagnik") rather than
+    inferred, so it can address them by name or answer "what's my name"
+    correctly instead of guessing."""
+    return registry.get_active() or "the user"
 
 # Matches a trailing "(DD/MM/YY)"-style date this user's descriptions often
 # embed, e.g. "Zomato (28/08/26)" - a past description is a great style
@@ -403,8 +414,8 @@ def insight(range: str = "this_month", date_from: Optional[date_type] = None, da
         insight_text = llm_router.complete(
             "summarize", prompt,
             system_message=(
-                "You are a friendly personal-finance assistant writing a detailed, narrative explanation "
-                "of a spending period - thorough rather than terse."
+                f"The user's name is {_active_username()}. You are a friendly personal-finance assistant "
+                "writing a detailed, narrative explanation of a spending period - thorough rather than terse."
             ),
             max_output_tokens=450,
         )
@@ -446,7 +457,8 @@ def compare_recap(payload: CompareRecapIn, session: Session = Depends(get_sessio
     try:
         recap_text = llm_router.complete(
             "summarize", prompt,
-            system_message="You are a friendly personal-finance assistant comparing two time periods.",
+            system_message=f"The user's name is {_active_username()}. You are a friendly personal-finance "
+            "assistant comparing two time periods.",
             max_output_tokens=220,
         )
     except Exception as e:
@@ -591,6 +603,7 @@ def ask(payload: AskIn, session: Session = Depends(get_session)):
     # here in Python from range_type/range_n rather than trusting a small
     # model's own date arithmetic, which is far more error-prone.
     system_message = (
+        f"The user's name is {_active_username()}.\n"
         "You convert a personal-finance question into a structured query, using the conversation history (if "
         "given) to resolve follow-up questions that don't repeat context on their own - e.g. if the previous "
         "question was about \"Food-Order last month\" and the new one is just \"what about this month?\", carry "
@@ -821,7 +834,8 @@ def ask(payload: AskIn, session: Session = Depends(get_session)):
         try:
             llm_answer = llm_router.complete(
                 "summarize", prompt,
-                system_message="You are a precise personal-finance assistant. Never invent figures - only use the ones given.",
+                system_message=f"The user's name is {_active_username()}. You are a precise personal-finance "
+                "assistant. Never invent figures - only use the ones given.",
                 max_output_tokens=130,
             ).strip()
             # The model has, in practice, altered the actual computed figure

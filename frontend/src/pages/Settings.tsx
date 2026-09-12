@@ -39,6 +39,32 @@ export function Settings() {
     },
   });
 
+  const [spreadsheetIdInput, setSpreadsheetIdInput] = useState('');
+  useEffect(() => {
+    setSpreadsheetIdInput(config.data?.google_spreadsheet_id ?? '');
+  }, [config.data?.google_spreadsheet_id]);
+  const saveSpreadsheetId = useMutation({
+    mutationFn: (id: string) => api.setSpreadsheetId(id),
+    onSuccess: () => invalidate('syncConfig'),
+  });
+
+  const uploadCredentials = useMutation({
+    mutationFn: (json: string) => api.uploadCredentials(json),
+    onSuccess: () => invalidate('syncConfig'),
+  });
+  const clearCredentials = useMutation({
+    mutationFn: () => api.clearCredentials(),
+    onSuccess: () => invalidate('syncConfig'),
+  });
+  function onCredentialsFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // allow re-selecting the same file later
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => uploadCredentials.mutate(String(reader.result));
+    reader.readAsText(file);
+  }
+
   const [goalInput, setGoalInput] = useState('');
   useEffect(() => {
     if (savingsGoal.data?.goal_amount) setGoalInput(String(savingsGoal.data.goal_amount));
@@ -199,11 +225,53 @@ export function Settings() {
         <CardHeader>
           <CardTitle>Google Sheets sync</CardTitle>
           <CardDescription className="space-y-0.5">
-            <div>Credentials: {config.data?.credentials_configured ? '✓ configured' : '✗ not configured — see docs/service_account_setup.md'}</div>
-            <div>Spreadsheet ID: {config.data?.google_spreadsheet_id || 'not set (add GOOGLE_SPREADSHEET_ID to .env)'}</div>
+            <div>
+              Credentials: {config.data?.credentials_configured
+                ? (config.data.has_own_credentials ? '✓ your own service account key' : '✓ using the shared default key')
+                : '✗ not configured — see docs/service_account_setup.md'}
+            </div>
             <div>Sync interval: every {config.data?.sync_interval_seconds}s</div>
+            <div>This is per-profile - each user has their own Sheet and (optionally) their own credentials.</div>
           </CardDescription>
         </CardHeader>
+        <CardContent className="flex flex-wrap items-center gap-2.5 border-b pb-4">
+          <Label htmlFor="credentials-file" className="text-sm">Service account key</Label>
+          <input
+            id="credentials-file" type="file" accept="application/json,.json"
+            className="text-sm file:mr-2 file:rounded-md file:border file:bg-background file:px-2.5 file:py-1.5 file:text-sm"
+            onChange={onCredentialsFile}
+          />
+          {config.data?.has_own_credentials && (
+            <Button size="sm" variant="outline" disabled={clearCredentials.isPending} onClick={() => clearCredentials.mutate()}>
+              Revert to shared default
+            </Button>
+          )}
+          {uploadCredentials.isSuccess && <span className="text-sm text-green-600">Saved ({uploadCredentials.data.client_email}).</span>}
+          {uploadCredentials.isError && <span className="text-sm text-destructive">{(uploadCredentials.error as Error).message}</span>}
+          <span className="w-full text-xs text-muted-foreground">
+            Upload the JSON key file downloaded from Google Cloud Console for this profile's own service
+            account - leave unset to use the shared default from .env instead. See
+            docs/service_account_setup.md for creating one.
+          </span>
+        </CardContent>
+        <CardContent className="flex flex-wrap items-center gap-2.5 border-b pb-4">
+          <Label htmlFor="spreadsheet-id-input" className="text-sm">Spreadsheet ID</Label>
+          <Input
+            id="spreadsheet-id-input" className="w-80" placeholder="e.g. 1dCcwuvIpMBvSjtQ2ghs..."
+            value={spreadsheetIdInput} onChange={(e) => setSpreadsheetIdInput(e.target.value)}
+          />
+          <Button
+            size="sm" disabled={saveSpreadsheetId.isPending}
+            onClick={() => saveSpreadsheetId.mutate(spreadsheetIdInput.trim())}
+          >
+            Save
+          </Button>
+          {saveSpreadsheetId.isSuccess && <span className="text-sm text-green-600">Saved.</span>}
+          <span className="w-full text-xs text-muted-foreground">
+            From the sheet's URL (the long ID between /d/ and /edit) - leave blank to turn sync off for this
+            profile. See docs/service_account_setup.md for sharing a sheet with the service account first.
+          </span>
+        </CardContent>
         <CardContent className="flex flex-wrap items-center gap-2.5">
           <Label htmlFor="interval-input" className="text-sm">Change to</Label>
           <Input id="interval-input" type="number" min={config.data?.sync_interval_min ?? 15} step="5"

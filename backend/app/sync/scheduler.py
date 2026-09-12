@@ -4,14 +4,15 @@ UI polls (spec section 19) and a manual trigger_now() for the "Sync Now" button/
 import logging
 import threading
 from datetime import datetime, timezone
+from pathlib import Path
 
 from apscheduler.schedulers.background import BackgroundScheduler
-from googleapiclient.errors import HttpError
 
 from app.config import settings
 from app.db import session_scope
 from app.repositories.app_settings import (
-    PERIOD_TAB_SORT_DIRECTION_KEY, SHEET_SORT_DIRECTION_KEY, SYNC_INTERVAL_KEY, AppSettingRepository,
+    CREDENTIALS_PATH_KEY, PERIOD_TAB_SORT_DIRECTION_KEY, SHEET_SORT_DIRECTION_KEY, SPREADSHEET_ID_KEY,
+    SYNC_INTERVAL_KEY, AppSettingRepository,
 )
 from app.repositories.categories import CategoryRepository
 from app.repositories.accounts import AccountRepository
@@ -21,14 +22,6 @@ from app.sync.engine import compact_and_sort, run_sync_cycle
 from typing import Optional
 
 MIN_INTERVAL_SECONDS = 15  # floor to avoid hammering the Sheets API from the UI
-
-NEEDS_SPREADSHEET_ID_MSG = (
-    "GOOGLE_SPREADSHEET_ID is not set, and this service account can't create its own "
-    "spreadsheet - personal (non-Workspace) Google accounts give service accounts no "
-    "Drive storage of their own, so file creation is refused. Fix: create a blank "
-    "Google Sheet yourself, share it with {email} as Editor, then set "
-    "GOOGLE_SPREADSHEET_ID to its ID (from the sheet's URL) in .env."
-)
 
 logger = logging.getLogger("budget_tracker.scheduler")
 
@@ -48,10 +41,21 @@ _status = {
     "last_error": None,
 }
 _scheduler: Optional[BackgroundScheduler] = None
-_active_spreadsheet_id: Optional[str] = None  # resolved lazily: settings value, or one this process created
 _current_interval: int = settings.sync_interval_seconds  # overridden from DB (if set) in start()
 _current_sort_descending: bool = True  # overridden from DB (if set) in start()
 _current_tab_sort_descending: bool = True  # overridden from DB (if set) in start()
+# The ACTIVE USER's own spreadsheet id - never a shared/global fallback. Kept
+# as a cache (like the settings above) refreshed by _load_settings_for_active_user(),
+# which runs both at startup and every time the active user changes, so
+# switching profiles can never leave one user's sync pointed at another
+# user's real Google Sheet using stale, previously-loaded settings.
+_current_spreadsheet_id: str = ""
+# The ACTIVE USER's own uploaded service account key path, if they have one -
+# same refresh discipline as the spreadsheet id above. Empty means "use the
+# shared default from .env" (credentials_path_or_default() below), not "no
+# credentials" - that's what keeps the original single-user setup working
+# without anyone having to re-upload anything.
+_current_credentials_path: str = ""
 
 
 def get_status() -> dict:
@@ -64,63 +68,45 @@ def _set_status(**kwargs) -> None:
         _status.update(kwargs)
 
 
+def credentials_path_or_default() -> Optional[str]:
+    """The active user's own key file if they've uploaded one, else the
+    shared default from .env - None if neither exists."""
+    if _current_credentials_path and Path(_current_credentials_path).exists():
+        return _current_credentials_path
+    if settings.google_service_account_key_path and Path(settings.google_service_account_key_path).exists():
+        return settings.google_service_account_key_path
+    return None
+
+
+def has_own_credentials() -> bool:
+    return bool(_current_credentials_path)
+
+
+def is_credentials_configured() -> bool:
+    return credentials_path_or_default() is not None
+
+
 def _sheets_client() -> Optional[GoogleSheetsService]:
-    if not settings.credentials_configured:
+    path = credentials_path_or_default()
+    if not path:
         return None
-    return GoogleSheetsService(settings.google_service_account_key_path)
-
-
-def _resolve_spreadsheet_id(sheets: GoogleSheetsService) -> str:
-    """Uses GOOGLE_SPREADSHEET_ID from .env if set. Otherwise makes one best-effort
-    attempt to create a new 'Budget Tracker' spreadsheet (works for Workspace-backed
-    service accounts) - if that's refused (the common case for personal @gmail.com
-    accounts, which give service accounts no Drive storage of their own), raises a
-    clear, actionable error instead of retrying or hanging."""
-    global _active_spreadsheet_id
-    if settings.google_spreadsheet_id:
-        return settings.google_spreadsheet_id
-    if _active_spreadsheet_id:
-        return _active_spreadsheet_id
-
-    try:
-        spreadsheet_id = sheets.create_spreadsheet("Budget Tracker")
-    except HttpError as e:
-        status = e.resp.status if getattr(e, "resp", None) else None
-        if status == 403:
-            raise RuntimeError(NEEDS_SPREADSHEET_ID_MSG.format(email=sheets.service_account_email)) from e
-        raise
-
-    if settings.owner_email:
-        sheets.share_with(spreadsheet_id, settings.owner_email, role="writer")
-    url = sheets.spreadsheet_url(spreadsheet_id)
-    logger.warning(
-        "Created new spreadsheet %r (%s). Add GOOGLE_SPREADSHEET_ID=%s to .env and "
-        "restart so future runs reuse this sheet instead of creating another one.",
-        spreadsheet_id, url, spreadsheet_id,
-    )
-    _active_spreadsheet_id = spreadsheet_id
-    with session_scope() as session:
-        from app.repositories.sync import SyncRepository
-        SyncRepository(session).log(
-            f"Created new spreadsheet: {url} - set GOOGLE_SPREADSHEET_ID={spreadsheet_id} in .env",
-        )
-    return spreadsheet_id
+    return GoogleSheetsService(path)
 
 
 def run_once() -> dict:
     """Runs a single sync cycle synchronously and returns its summary. Safe to call
     from the scheduler, the CLI, or the 'Sync Now' API endpoint - only one runs at a
     time (guarded by _sync_lock) so concurrent triggers can't race each other."""
-    if not settings.credentials_configured:
+    if not is_credentials_configured() or not _current_spreadsheet_id:
         _set_status(state="not_configured")
-        return {"error": "Google credentials not configured yet - see docs/service_account_setup.md"}
+        return {"error": "Google Sheets isn't configured for this user - set a Spreadsheet ID in Settings."}
 
     if not _sync_lock.acquire(blocking=False):
         return {"error": "sync already in progress"}
     try:
         _set_status(state="syncing")
         sheets = _sheets_client()
-        spreadsheet_id = _resolve_spreadsheet_id(sheets)
+        spreadsheet_id = _current_spreadsheet_id
         with session_scope() as session:
             CategoryRepository(session).ensure_defaults()
             AccountRepository(session).ensure_default()
@@ -150,14 +136,13 @@ def run_compact_and_sort_once() -> dict:
     Up & Sort Sheet Now" button in Settings. Shares _sync_lock with
     run_once() so it can't run concurrently with (or be raced by) a real
     pull/push cycle."""
-    if not settings.credentials_configured:
-        return {"error": "Google credentials not configured yet - see docs/service_account_setup.md"}
+    if not is_credentials_configured() or not _current_spreadsheet_id:
+        return {"error": "Google Sheets isn't configured for this user - set a Spreadsheet ID in Settings."}
     if not _sync_lock.acquire(blocking=False):
         return {"error": "sync already in progress"}
     try:
         sheets = _sheets_client()
-        spreadsheet_id = _resolve_spreadsheet_id(sheets)
-        return compact_and_sort(sheets, spreadsheet_id, descending=_current_sort_descending)
+        return compact_and_sort(sheets, _current_spreadsheet_id, descending=_current_sort_descending)
     except Exception as e:
         logger.exception("manual sheet compaction crashed")
         return {"error": str(e)}
@@ -170,14 +155,13 @@ def run_reorder_tabs_once() -> dict:
     "Reorder Tabs Now" button in Settings. Shares _sync_lock with
     run_once() so it can't run concurrently with (or be raced by) a real
     pull/push cycle."""
-    if not settings.credentials_configured:
-        return {"error": "Google credentials not configured yet - see docs/service_account_setup.md"}
+    if not is_credentials_configured() or not _current_spreadsheet_id:
+        return {"error": "Google Sheets isn't configured for this user - set a Spreadsheet ID in Settings."}
     if not _sync_lock.acquire(blocking=False):
         return {"error": "sync already in progress"}
     try:
         sheets = _sheets_client()
-        spreadsheet_id = _resolve_spreadsheet_id(sheets)
-        return periods_mod.reorder_period_tabs(sheets, spreadsheet_id, descending=_current_tab_sort_descending)
+        return periods_mod.reorder_period_tabs(sheets, _current_spreadsheet_id, descending=_current_tab_sort_descending)
     except Exception as e:
         logger.exception("manual tab reorder crashed")
         return {"error": str(e)}
@@ -236,20 +220,114 @@ def set_tab_sort_descending(descending: bool) -> bool:
     return descending
 
 
-def start() -> None:
-    global _scheduler, _current_interval, _current_sort_descending, _current_tab_sort_descending
-    if _scheduler is not None:
-        return
-    if settings.credentials_configured:
-        _set_status(state="idle")
+def get_spreadsheet_id() -> str:
+    return _current_spreadsheet_id
 
+
+def set_spreadsheet_id(spreadsheet_id: str) -> str:
+    """Sets (or clears, given "") the spreadsheet id for whichever user is
+    CURRENTLY active - never any other user's. This is the only place a
+    spreadsheet id is written outside the one-time legacy migration below."""
+    global _current_spreadsheet_id
+    spreadsheet_id = spreadsheet_id.strip()
     with session_scope() as session:
-        override = AppSettingRepository(session).get(SYNC_INTERVAL_KEY)
-        sort_override = AppSettingRepository(session).get(SHEET_SORT_DIRECTION_KEY)
-        tab_sort_override = AppSettingRepository(session).get(PERIOD_TAB_SORT_DIRECTION_KEY)
-    _current_interval = max(int(override), MIN_INTERVAL_SECONDS) if override else settings.sync_interval_seconds
+        repo = AppSettingRepository(session)
+        if spreadsheet_id:
+            repo.set(SPREADSHEET_ID_KEY, spreadsheet_id)
+        else:
+            repo.clear(SPREADSHEET_ID_KEY)
+    _current_spreadsheet_id = spreadsheet_id
+    _set_status(state="idle" if (is_credentials_configured() and spreadsheet_id) else "not_configured")
+    logger.info("Spreadsheet id %s for the active user", "set" if spreadsheet_id else "cleared")
+    return spreadsheet_id
+
+
+def _migrate_legacy_spreadsheet_id(session) -> None:
+    """One-time: the original single-user setup's spreadsheet id lived in
+    .env (GOOGLE_SPREADSHEET_ID), global to the whole process. It's migrated
+    into that SAME user's own per-user setting here, exactly once (only if
+    they don't already have one of their own), and NEVER applied to any
+    other user - a brand new profile (demo, admin, ...) always starts with
+    sync unconfigured, full stop, so switching into one can't silently sync
+    its local data against someone else's real Google Sheet."""
+    from app.db import DEFAULT_USERNAME
+    from app.user_registry import registry
+    if registry.get_active() != DEFAULT_USERNAME or not settings.google_spreadsheet_id:
+        return
+    repo = AppSettingRepository(session)
+    if repo.get(SPREADSHEET_ID_KEY) is None:
+        repo.set(SPREADSHEET_ID_KEY, settings.google_spreadsheet_id)
+        logger.info("Migrated legacy GOOGLE_SPREADSHEET_ID into %r's own settings", DEFAULT_USERNAME)
+
+
+def get_credentials_path() -> str:
+    return _current_credentials_path
+
+
+def set_credentials_path(path: str) -> None:
+    """Records the ACTIVE user's own credentials file path - the caller
+    (app/api/sync.py's /credentials endpoint) is responsible for actually
+    validating and writing the key file itself; this just persists the
+    pointer to it, same discipline as set_spreadsheet_id()."""
+    global _current_credentials_path
+    with session_scope() as session:
+        AppSettingRepository(session).set(CREDENTIALS_PATH_KEY, path)
+    _current_credentials_path = path
+    _set_status(state="idle" if (is_credentials_configured() and _current_spreadsheet_id) else "not_configured")
+    logger.info("Own credentials set for the active user")
+
+
+def clear_credentials_path() -> None:
+    """Reverts the active user to the shared default credentials (.env),
+    if any - does NOT delete the uploaded key file itself, just stops
+    pointing at it, in case they want to switch back later."""
+    global _current_credentials_path
+    with session_scope() as session:
+        AppSettingRepository(session).clear(CREDENTIALS_PATH_KEY)
+    _current_credentials_path = ""
+    _set_status(state="idle" if (is_credentials_configured() and _current_spreadsheet_id) else "not_configured")
+    logger.info("Reverted the active user to the shared default credentials")
+
+
+def _load_settings_for_active_user() -> None:
+    global _current_interval, _current_sort_descending, _current_tab_sort_descending
+    global _current_spreadsheet_id, _current_credentials_path
+    with session_scope() as session:
+        _migrate_legacy_spreadsheet_id(session)
+        repo = AppSettingRepository(session)
+        interval_override = repo.get(SYNC_INTERVAL_KEY)
+        sort_override = repo.get(SHEET_SORT_DIRECTION_KEY)
+        tab_sort_override = repo.get(PERIOD_TAB_SORT_DIRECTION_KEY)
+        spreadsheet_id = repo.get(SPREADSHEET_ID_KEY)
+        credentials_path = repo.get(CREDENTIALS_PATH_KEY)
+    _current_interval = max(int(interval_override), MIN_INTERVAL_SECONDS) if interval_override else settings.sync_interval_seconds
     _current_sort_descending = sort_override != "asc"
     _current_tab_sort_descending = tab_sort_override != "asc"
+    _current_spreadsheet_id = spreadsheet_id or ""
+    _current_credentials_path = credentials_path or ""
+    _set_status(state="idle" if (is_credentials_configured() and _current_spreadsheet_id) else "not_configured")
+
+
+def reload_for_active_user() -> None:
+    """Re-reads every per-user sync setting (interval, sort directions,
+    spreadsheet id) from whichever user is now active and reschedules the
+    interval job to match. Called right after switch_active_db() so a
+    profile switch can never leave sync running on stale settings loaded
+    from the PREVIOUS user - the spreadsheet id above all."""
+    _load_settings_for_active_user()
+    if _scheduler is not None:
+        _scheduler.reschedule_job("sync_cycle", trigger="interval", seconds=_current_interval)
+    logger.info(
+        "Sync settings reloaded for the active user (spreadsheet %s)",
+        "configured" if _current_spreadsheet_id else "not configured",
+    )
+
+
+def start() -> None:
+    global _scheduler
+    if _scheduler is not None:
+        return
+    _load_settings_for_active_user()
 
     _scheduler = BackgroundScheduler(daemon=True)
     _scheduler.add_job(run_once, "interval", seconds=_current_interval,

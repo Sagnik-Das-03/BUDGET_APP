@@ -7,7 +7,6 @@ import {
 import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { SyncStatusWidget } from './SyncStatus';
-import { ModeToggle } from './ModeToggle';
 import { UserSwitcher } from './UserSwitcher';
 
 const LINKS = [
@@ -20,15 +19,20 @@ const LINKS = [
   { to: '/settings', label: 'Settings', icon: Settings },
 ];
 
+const ADMIN_LINKS = [
+  { to: '/admin', label: 'Admin', end: true, icon: ShieldCheck },
+];
+
 // Ask and Logs live in TopRightDrawers (rendered from App.tsx) instead of
 // here - they're drawers reachable from every page, not routed tabs.
 export function NavBar() {
   // Same query UserSwitcher already runs, so this is a cache hit, not an
-  // extra request - just used here to decide whether to show the Admin link
-  // at all, since it's only meaningful while signed in as that profile.
+  // extra request - just used here to decide the nav's whole shape.
   const users = useQuery({ queryKey: ['users'], queryFn: () => api.listUsers() });
   const isAdmin = users.data?.some((u) => u.is_active && u.username.toLowerCase() === 'admin') ?? false;
-  const links = isAdmin ? [...LINKS, { to: '/admin', label: 'Admin', icon: ShieldCheck }] : LINKS;
+  // admin isn't a financial profile - it never has transactions of its own,
+  // so it gets only user management, not the rest of the app's nav.
+  const links = isAdmin ? ADMIN_LINKS : LINKS;
 
   return (
     <aside className="sticky top-0 flex h-screen w-60 shrink-0 flex-col border-r bg-card/80 backdrop-blur supports-backdrop-filter:bg-card/60">
@@ -58,8 +62,7 @@ export function NavBar() {
       </nav>
       <div className="flex flex-col gap-2.5 border-t px-3 py-3">
         <UserSwitcher />
-        <SyncStatusWidget />
-        <ModeToggle />
+        {!isAdmin && <SyncStatusWidget />}
       </div>
     </aside>
   );

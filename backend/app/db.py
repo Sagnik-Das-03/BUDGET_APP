@@ -109,6 +109,16 @@ def switch_active_db(db_file: str) -> None:
     # right after someone was last active on it), not just a resource nicety.
     old_engine.dispose()
 
+    # The sync scheduler caches per-user settings (interval, sort direction,
+    # and critically the Google Sheet id) in memory - without this, switching
+    # users would leave the scheduler running on the PREVIOUS user's cached
+    # spreadsheet id, meaning the new user's local data could get pushed to
+    # (or overwritten by) someone else's real Google Sheet. Lazy import to
+    # avoid a circular import at module load time (scheduler imports this
+    # module's session_scope/get_session).
+    from app.sync import scheduler
+    scheduler.reload_for_active_user()
+
 
 def create_empty_db(db_file: str) -> None:
     """Initializes a brand-new user's SQLite file with the current schema,

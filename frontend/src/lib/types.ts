@@ -10,11 +10,14 @@ export interface UserStat {
   is_active: boolean;
   db_size_bytes: number;
   transaction_count: number;
+  has_password: boolean;
 }
 
 export interface UserStats {
   total_users: number;
   total_size_bytes: number;
+  total_transactions: number;
+  users_with_password: number;
   users: UserStat[];
 }
 
@@ -353,6 +356,7 @@ export interface MonthlyBreakdownRow {
 
 export interface SyncConfig {
   credentials_configured: boolean;
+  has_own_credentials: boolean;
   google_spreadsheet_id: string;
   sync_interval_seconds: number;
   sync_interval_default: number;

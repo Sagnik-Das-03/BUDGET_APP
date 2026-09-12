@@ -131,9 +131,12 @@ being able to see their own data (by design; there's no cross-user anything).
   connection left on the old SQLite file blocks deleting that file on Windows.
 - **The original single-user database was migrated automatically**, not by
   hand: the first time the registry doesn't exist yet, it's created pointing
-  at whatever `db_path` already resolved to (the classic `data/
-  budget_tracker.db`) under a default username - the file itself is never
-  moved, renamed, or rewritten by this migration.
+  at whatever `db_path` already resolved to, under a default username - the
+  file itself is never moved, renamed, or rewritten by this migration (a
+  later manual rename, e.g. to match the `{username}.db` convention every
+  user created since uses, just needs the registry's `db_file` entry updated
+  to match - the server must be stopped first, since Windows won't let you
+  rename a file a live SQLite connection still has open).
 - **Creating a user never touches the active session.** `create_empty_db()`
   and `session_for()` open a throwaway engine bound to the *new* file,
   seed it (default categories/account, optionally `demo_data.py`'s synthetic
@@ -152,13 +155,28 @@ being able to see their own data (by design; there's no cross-user anything).
   have to switch into "admin" just to add a user. Also open (no check) until
   an `admin` user exists and has actually set a password, for the same
   backward-compatible reason as above.
-- **The Admin page** (`/admin`, linked in the nav only while signed in as
-  `admin`) lists every user with live disk usage and transaction count
-  (`GET /api/users/stats` - opens a throwaway session per user, same pattern
-  as creation), and lets you create or permanently delete a profile - deletion
-  asks for confirmation via a real dialog (shadcn `AlertDialog`, not
-  `window.confirm`), refuses to delete the currently active user or the last
-  remaining one, and removes the actual `.db` file on disk, not just the
+- **Google Sheets sync is per-profile on both axes - spreadsheet AND
+  credentials** (`app/sync/scheduler.py`). Each user has their own
+  `spreadsheet_id` and, optionally, their own uploaded service account key
+  (`data/credentials/<username>.json`, validated as a real service-account
+  JSON - `type`, `client_email`, `private_key` - before being saved); a user
+  with no key of their own falls back to the shared default in `.env`
+  (`GOOGLE_SERVICE_ACCOUNT_KEY_PATH`). Both are cached in memory and reloaded
+  by `reload_for_active_user()` on every switch - this exists because of a
+  real near-incident: before this fix, switching to a demo profile inherited
+  the previous user's cached spreadsheet id, which would have pushed the demo
+  profile's synthetic transactions into the real Google Sheet on the next
+  sync tick. `GOOGLE_SPREADSHEET_ID` in `.env` is now only ever consulted
+  once, to migrate the original setup's spreadsheet into that same user's own
+  setting - never applied to any other/new profile.
+- **The Admin page** (`/admin` - while signed in as `admin`, it's the *only*
+  nav item shown, since that profile is never a financial one) lists every
+  user with live disk usage and transaction count (`GET /api/users/stats` -
+  opens a throwaway session per user, same pattern as creation), and lets you
+  create or permanently delete a profile - deletion asks for confirmation via
+  a real dialog (shadcn `AlertDialog`, not `window.confirm`), refuses to
+  delete the currently active user or the last remaining one, and removes the
+  actual `.db` file on disk, not just the
   registry entry.
 
 ## Data model

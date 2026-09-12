@@ -223,6 +223,16 @@ export const api = {
   syncConfig: () => request<SyncConfig>('/api/sync/config'),
   setSyncInterval: (seconds: number) =>
     request<{ sync_interval_seconds: number }>('/api/sync/interval', { method: 'POST', body: JSON.stringify({ seconds }) }),
+  setSpreadsheetId: (spreadsheetId: string) =>
+    request<{ google_spreadsheet_id: string }>('/api/sync/spreadsheet_id', {
+      method: 'POST', body: JSON.stringify({ spreadsheet_id: spreadsheetId }),
+    }),
+  uploadCredentials: (credentialsJson: string) =>
+    request<{ configured: boolean; client_email: string }>('/api/sync/credentials', {
+      method: 'POST', body: JSON.stringify({ credentials_json: credentialsJson }),
+    }),
+  clearCredentials: () =>
+    request<{ configured: boolean }>('/api/sync/credentials', { method: 'DELETE' }),
   syncNow: () => request('/api/sync/now', { method: 'POST' }),
   setSheetSortDirection: (descending: boolean) =>
     request<{ sheet_sort_descending: boolean }>('/api/sync/sort_direction', { method: 'POST', body: JSON.stringify({ descending }) }),
