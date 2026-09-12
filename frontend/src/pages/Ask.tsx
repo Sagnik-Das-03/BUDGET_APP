@@ -1,17 +1,21 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
-import { Loader2, Plus, Send, X } from 'lucide-react';
+import { Loader2, Plus, Send, ThumbsDown, ThumbsUp, X } from 'lucide-react';
 import { api } from '../lib/api';
-import type { ChatMessage } from '../lib/types';
+import type { AskRow, ChatMessage } from '../lib/types';
+import { fmtMoney } from '../lib/format';
 import { useElapsedSeconds } from '../lib/useElapsedSeconds';
 import { ModelBadge } from '../components/ModelBadge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
 interface Exchange {
+  id: number;
   question: string;
   answer: string;
   durationSec?: number;
+  rows?: AskRow[];
+  feedback?: 'up' | 'down' | null;
 }
 
 const EXAMPLES = [
@@ -20,8 +24,11 @@ const EXAMPLES = [
   'what is my average shopping expense?',
 ];
 
-function toExchange(m: ChatMessage): Exchange {
-  return { question: m.question, answer: m.answer, durationSec: m.duration_sec ?? undefined };
+function toExchange(m: ChatMessage & { rows?: AskRow[] }): Exchange {
+  return {
+    id: m.id, question: m.question, answer: m.answer,
+    durationSec: m.duration_sec ?? undefined, rows: m.rows, feedback: m.feedback,
+  };
 }
 
 export function Ask() {
@@ -68,32 +75,46 @@ export function Ask() {
   const ask = useMutation({
     mutationFn: (q: string) => api.ask(q, activeId),
     onSuccess: (res, q) => {
-      const exchange: Exchange = {
-        question: q, answer: res.answer,
-        durationSec: res.duration_sec ?? (Date.now() - startRef.current) / 1000,
+      const durationSec = res.duration_sec ?? (Date.now() - startRef.current) / 1000;
+      const newMessage: ChatMessage & { rows?: AskRow[] } = {
+        id: res.message_id ?? Date.now(), question: q, answer: res.answer,
+        duration_sec: durationSec, feedback: null, created_at: new Date().toISOString(), rows: res.rows,
       };
       if (activeId === null && res.thread_id) {
-        queryClient.setQueryData(['chatMessages', res.thread_id], [
-          { id: 0, question: q, answer: res.answer, duration_sec: exchange.durationSec ?? null, created_at: new Date().toISOString() },
-        ]);
+        queryClient.setQueryData(['chatMessages', res.thread_id], [newMessage]);
         setActiveId(res.thread_id);
         setDraftHistory([]);
       } else if (activeId !== null) {
         queryClient.setQueryData(['chatMessages', activeId], (old: ChatMessage[] | undefined) => [
-          ...(old ?? []),
-          { id: Date.now(), question: q, answer: res.answer, duration_sec: exchange.durationSec ?? null, created_at: new Date().toISOString() },
+          ...(old ?? []), newMessage,
         ]);
       }
       queryClient.invalidateQueries({ queryKey: ['chatThreads'] });
     },
     onError: (err: Error, q) => {
-      const exchange: Exchange = { question: q, answer: `Error: ${err.message}` };
+      const exchange: Exchange = { id: Date.now(), question: q, answer: `Error: ${err.message}` };
       if (activeId === null) setDraftHistory((h) => [...h, exchange]);
       else queryClient.setQueryData(['chatMessages', activeId], (old: ChatMessage[] | undefined) => [
-        ...(old ?? []), { id: Date.now(), question: q, answer: exchange.answer, duration_sec: null, created_at: new Date().toISOString() },
+        ...(old ?? []), { id: exchange.id, question: q, answer: exchange.answer, duration_sec: null, feedback: null, created_at: new Date().toISOString() },
       ]);
     },
   });
+
+  const feedback = useMutation({
+    mutationFn: ({ messageId, helpful, note }: { messageId: number; helpful: boolean; note?: string }) =>
+      api.sendChatFeedback(messageId, helpful, note),
+    onSuccess: (_res, { messageId, helpful }) => {
+      const patch = (list: ChatMessage[] | undefined) =>
+        (list ?? []).map((m) => (m.id === messageId ? { ...m, feedback: helpful ? 'up' as const : 'down' as const } : m));
+      if (activeId === null) {
+        setDraftHistory((h) => h.map((e) => (e.id === messageId ? { ...e, feedback: helpful ? 'up' : 'down' } : e)));
+      } else {
+        queryClient.setQueryData(['chatMessages', activeId], patch);
+      }
+    },
+  });
+  const [correctingId, setCorrectingId] = useState<number | null>(null);
+  const [correctionNote, setCorrectionNote] = useState('');
   const elapsed = useElapsedSeconds(ask.isPending);
 
   const deleteThread = useMutation({
@@ -204,10 +225,75 @@ export function Ask() {
             <div className="self-end max-w-[80%] rounded-lg bg-primary px-3.5 py-2 text-sm text-primary-foreground">
               {h.question}
             </div>
-            <div className="self-start max-w-[80%] rounded-lg bg-muted px-3.5 py-2 text-sm">
+            <div className="self-start max-w-[85%] rounded-lg bg-muted px-3.5 py-2 text-sm">
               {h.answer}
               {h.durationSec !== undefined && (
                 <div className="mt-1 text-xs text-muted-foreground">Answered in {h.durationSec.toFixed(1)}s</div>
+              )}
+
+              {!!h.rows?.length && (
+                <details className="mt-2">
+                  <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">
+                    {h.rows.length} matching transaction{h.rows.length !== 1 ? 's' : ''} found
+                  </summary>
+                  <div className="mt-1.5 flex flex-col gap-1 rounded-md border bg-background p-2">
+                    {h.rows.map((r, ri) => (
+                      <div key={ri} className="flex items-center justify-between gap-2 text-xs">
+                        <span className="text-muted-foreground">{r.date}</span>
+                        <span className="flex-1 truncate">{r.description}</span>
+                        <span className="text-muted-foreground">{r.category}</span>
+                        <span className="tabular-nums">{fmtMoney(r.amount)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              )}
+
+              <div className="mt-1.5 flex items-center gap-1">
+                <button
+                  type="button"
+                  aria-label="Helpful"
+                  className={`rounded p-1 hover:bg-accent ${h.feedback === 'up' ? 'text-primary' : 'text-muted-foreground'}`}
+                  disabled={feedback.isPending}
+                  onClick={() => feedback.mutate({ messageId: h.id, helpful: true })}
+                >
+                  <ThumbsUp className="size-3.5" />
+                </button>
+                <button
+                  type="button"
+                  aria-label="Not helpful"
+                  className={`rounded p-1 hover:bg-accent ${h.feedback === 'down' ? 'text-destructive' : 'text-muted-foreground'}`}
+                  disabled={feedback.isPending}
+                  onClick={() => { setCorrectingId(h.id); setCorrectionNote(''); }}
+                >
+                  <ThumbsDown className="size-3.5" />
+                </button>
+              </div>
+
+              {correctingId === h.id && (
+                <div className="mt-1.5 flex gap-1.5">
+                  <Input
+                    className="h-7 text-xs"
+                    placeholder="What was wrong? (optional, helps it not repeat the mistake)"
+                    value={correctionNote}
+                    onChange={(e) => setCorrectionNote(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        feedback.mutate({ messageId: h.id, helpful: false, note: correctionNote.trim() || undefined });
+                        setCorrectingId(null);
+                      }
+                    }}
+                  />
+                  <Button
+                    size="sm" variant="outline" className="h-7 px-2 text-xs"
+                    onClick={() => {
+                      feedback.mutate({ messageId: h.id, helpful: false, note: correctionNote.trim() || undefined });
+                      setCorrectingId(null);
+                    }}
+                  >
+                    Submit
+                  </Button>
+                </div>
               )}
             </div>
           </div>

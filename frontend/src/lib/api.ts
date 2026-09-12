@@ -2,8 +2,9 @@ import type {
   Account, AskResponse, Budget, BudgetAlert, BudgetVsActual, Category, CategoryDrilldownNode,
   CategoryTotal, CategoryTrend, CategoryVolatility, ChartPalette, ChatMessage, ChatThread, ConflictRow,
   EssentialSplit, Highlights, ImportCommitResult, ImportPreviewResult, ImportRowIn, Insight, LlmStatus,
-  MonthlyBreakdownRow, QuickAddResult, SavingsGoalProgress, SavingsStreak, SpendConcentration, SpendingPattern,
-  SyncConfig, SyncLogEntry, SyncStatus, Totals, Transaction, TrashedTransaction, TrendForRange, ViewFilters,
+  MonthlyBreakdownRow, QuickAddResult, SavedView, SavingsGoalProgress, SavingsStreak, SpendConcentration,
+  SpendingPattern, SyncConfig, SyncLogEntry, SyncStatus, Totals, Transaction, TrashedTransaction, TrendForRange,
+  ViewFilters,
 } from './types';
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -154,8 +155,19 @@ export const api = {
   chatMessages: (threadId: number) => request<ChatMessage[]>(`/api/llm/chat/threads/${threadId}/messages`),
   deleteChatThread: (threadId: number) =>
     request<{ deleted: boolean }>(`/api/llm/chat/threads/${threadId}`, { method: 'DELETE' }),
+  sendChatFeedback: (messageId: number, helpful: boolean, note?: string) =>
+    request<{ recorded: boolean }>(`/api/llm/chat/messages/${messageId}/feedback`, {
+      method: 'POST', body: JSON.stringify({ helpful, note: note ?? null }),
+    }),
   quickAdd: (text: string) =>
     request<QuickAddResult>('/api/llm/quick_add', { method: 'POST', body: JSON.stringify({ text }) }),
+
+  // ---------- saved views ----------
+  listSavedViews: () => request<SavedView[]>('/api/saved_views'),
+  createSavedView: (name: string, filters: ViewFilters) =>
+    request<SavedView>('/api/saved_views', { method: 'POST', body: JSON.stringify({ name, filters }) }),
+  deleteSavedView: (id: number) =>
+    request<{ deleted: boolean }>(`/api/saved_views/${id}`, { method: 'DELETE' }),
 
   // ---------- appearance ----------
   getPalette: () => request<ChartPalette>('/api/appearance/palette'),

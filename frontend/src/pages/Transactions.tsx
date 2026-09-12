@@ -1,11 +1,11 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, Lock, Pencil, Plus, Sparkles, Trash2, Unlock, X } from 'lucide-react';
 import { api } from '../lib/api';
 import { fmtMoney } from '../lib/format';
 import { useLocalStorage } from '../lib/useLocalStorage';
 import { useConfirmDialog } from '../lib/useConfirmDialog';
-import type { Transaction, ViewFilters } from '../lib/types';
+import type { SavedView, Transaction, ViewFilters } from '../lib/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
@@ -64,12 +64,6 @@ function draftFromTransaction(t: Transaction): EditDraft {
   };
 }
 
-interface SavedView {
-  id: string;
-  name: string;
-  filters: ViewFilters;
-}
-
 function buildQueryParams(f: ViewFilters) {
   return {
     year: f.year || undefined, month: f.month || undefined,
@@ -109,8 +103,33 @@ export function Transactions() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<EditDraft | null>(null);
   const [quickAddText, setQuickAddText] = useState('');
-  const [savedViews, setSavedViews] = useLocalStorage<SavedView[]>('budget_tracker.savedViews', []);
-  const [compareIds, setCompareIds] = useState<Set<string>>(new Set());
+  const savedViewsQuery = useQuery({ queryKey: ['savedViews'], queryFn: () => api.listSavedViews() });
+  const savedViews = savedViewsQuery.data ?? [];
+  const [compareIds, setCompareIds] = useState<Set<number>>(new Set());
+
+  // One-time migration: saved views used to live only in this browser's
+  // localStorage, so a different browser/device (or the backend, e.g. Ask
+  // referencing a view by name) never saw them. If the backend has none yet
+  // but the old localStorage key does, copy them over once and stop touching
+  // that key again - it's left in place (not cleared) purely as a harmless
+  // backup, since deleting a user's data as a side effect of a migration is
+  // not a risk worth taking for a few bytes of localStorage.
+  const migratedLegacyViews = useRef(false);
+  useEffect(() => {
+    if (migratedLegacyViews.current || !savedViewsQuery.isSuccess || savedViewsQuery.data.length > 0) return;
+    migratedLegacyViews.current = true;
+    try {
+      const raw = localStorage.getItem('budget_tracker.savedViews');
+      const legacy: { name: string; filters: ViewFilters }[] = raw ? JSON.parse(raw) : [];
+      if (legacy.length) {
+        Promise.all(legacy.map((v) => api.createSavedView(v.name, v.filters))).then(() =>
+          queryClient.invalidateQueries({ queryKey: ['savedViews'] }),
+        );
+      }
+    } catch {
+      // malformed/missing legacy data - nothing to migrate
+    }
+  }, [savedViewsQuery.isSuccess, savedViewsQuery.data, queryClient]);
   // Per-device, not a server setting - a lightweight "don't let me fat-finger
   // an edit" guard, not an access-control mechanism (the API itself is
   // unaffected either way).
@@ -268,8 +287,12 @@ export function Transactions() {
 
   const hasActiveFilters = !!(year || month || category.length || account.length || type || search);
 
+const saveView = useMutation({
+    mutationFn: (name: string) => api.createSavedView(name, currentFiltersSnapshot()),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['savedViews'] }),
+  });
   function saveCurrentView(name: string) {
-    setSavedViews([...savedViews, { id: crypto.randomUUID(), name, filters: currentFiltersSnapshot() }]);
+    saveView.mutate(name);
   }
 
   function applyView(view: SavedView) {
@@ -282,16 +305,22 @@ export function Transactions() {
     setPage(1);
   }
 
-  function deleteView(id: string) {
-    setSavedViews(savedViews.filter((v) => v.id !== id));
-    setCompareIds((prev) => {
-      const next = new Set(prev);
-      next.delete(id);
-      return next;
-    });
+  const deleteViewMutation = useMutation({
+    mutationFn: (id: number) => api.deleteSavedView(id),
+    onSuccess: (_res, id) => {
+      queryClient.invalidateQueries({ queryKey: ['savedViews'] });
+      setCompareIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    },
+  });
+  function deleteView(id: number) {
+    deleteViewMutation.mutate(id);
   }
 
-  function toggleCompare(id: string, checked: boolean) {
+  function toggleCompare(id: number, checked: boolean) {
     setCompareIds((prev) => {
       const next = new Set(prev);
       if (checked) next.add(id); else next.delete(id);

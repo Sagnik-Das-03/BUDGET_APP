@@ -153,6 +153,14 @@ class AskIn(BaseModel):
     thread_id: Optional[int] = None  # None = start a new chat thread
 
 
+class AskRowOut(BaseModel):
+    date: date_type
+    description: str
+    amount: float
+    transaction_type: str
+    category: str
+
+
 class AskOut(BaseModel):
     answer: str
     amount: Optional[float] = None
@@ -162,6 +170,11 @@ class AskOut(BaseModel):
     range: str
     thread_id: Optional[int] = None
     duration_sec: Optional[float] = None
+    # The actual matching rows behind the answer (capped) - lets you see
+    # exactly what was found and catch a bad extraction yourself, e.g. the
+    # wrong category or date range, instead of only trusting the phrased text.
+    rows: list[AskRowOut] = []
+    message_id: Optional[int] = None
 
 
 class ChatThreadOut(BaseModel):
@@ -177,9 +190,27 @@ class ChatMessageOut(BaseModel):
     question: str
     answer: str
     duration_sec: Optional[float] = None
+    feedback: Optional[str] = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class ChatFeedbackIn(BaseModel):
+    helpful: bool
+    note: Optional[str] = Field(default=None, max_length=500)
+
+
+class SavedViewIn(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    filters: dict
+
+
+class SavedViewOut(BaseModel):
+    id: int
+    name: str
+    filters: dict
+    created_at: datetime
 
 
 class BudgetIn(BaseModel):

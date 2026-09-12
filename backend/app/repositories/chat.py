@@ -3,7 +3,7 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import ChatMessage, ChatThread
+from app.models import AskCorrection, ChatMessage, ChatThread
 from app.utils import utcnow
 
 
@@ -37,8 +37,11 @@ class ChatRepository:
         return list(self.session.scalars(stmt))
 
     def add_message(self, thread_id: int, question: str, answer: str,
-                     duration_sec: Optional[float] = None) -> ChatMessage:
-        message = ChatMessage(thread_id=thread_id, question=question, answer=answer, duration_sec=duration_sec)
+                     duration_sec: Optional[float] = None, query_json: Optional[str] = None) -> ChatMessage:
+        message = ChatMessage(
+            thread_id=thread_id, question=question, answer=answer,
+            duration_sec=duration_sec, query_json=query_json,
+        )
         self.session.add(message)
         thread = self.get_thread(thread_id)
         if thread:
@@ -49,3 +52,25 @@ class ChatRepository:
                 thread.title = question[:60]
         self.session.flush()
         return message
+
+    def get_message(self, message_id: int) -> Optional[ChatMessage]:
+        return self.session.get(ChatMessage, message_id)
+
+    def set_feedback(self, message_id: int, helpful: bool, note: Optional[str] = None) -> Optional[ChatMessage]:
+        message = self.get_message(message_id)
+        if not message:
+            return None
+        message.feedback = "up" if helpful else "down"
+        message.feedback_note = note
+        self.session.flush()
+        return message
+
+    def add_correction(self, question: str, wrong_query_json: Optional[str], note: Optional[str]) -> AskCorrection:
+        correction = AskCorrection(question=question, wrong_query_json=wrong_query_json, note=note)
+        self.session.add(correction)
+        self.session.flush()
+        return correction
+
+    def recent_corrections(self, limit: int = 5) -> list[AskCorrection]:
+        stmt = select(AskCorrection).order_by(AskCorrection.created_at.desc()).limit(limit)
+        return list(self.session.scalars(stmt))

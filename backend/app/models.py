@@ -172,6 +172,19 @@ class SyncMeta(Base):
     last_row_count: Mapped[int] = mapped_column(Integer, default=0)
 
 
+class SavedView(Base):
+    """A named combination of Transactions-page filters (e.g. "Personal
+    Expenses") - previously kept only in the browser's localStorage, so it
+    never survived a different browser/device and nothing server-side (Ask
+    included) could reference it by name."""
+    __tablename__ = "saved_views"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    filters: Mapped[str] = mapped_column(Text, nullable=False)  # JSON-encoded ViewFilters
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
 class ChatThread(Base):
     """One tab in the Ask page - a running conversation of question/answer
     exchanges, kept so history survives a page reload and old threads can be
@@ -196,9 +209,31 @@ class ChatMessage(Base):
     question: Mapped[str] = mapped_column(Text, nullable=False)
     answer: Mapped[str] = mapped_column(Text, nullable=False)
     duration_sec: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    # The structured query actually extracted for this question (JSON) - kept
+    # so a later thumbs-down has something concrete to correct, instead of
+    # only the free-text question and answer.
+    query_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    feedback: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)  # "up" / "down" / null
+    feedback_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     thread: Mapped["ChatThread"] = relationship(back_populates="messages")
+
+
+class AskCorrection(Base):
+    """A confirmed correction learned from a thumbs-down on an Ask answer -
+    not model fine-tuning (not practical for a small local quantized model),
+    but a growing memory of past mistakes: recent corrections are fed back
+    into the extraction prompt for future questions as "don't repeat this"
+    examples, which is the realistic form "learning from feedback" can take
+    here."""
+    __tablename__ = "ask_corrections"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    wrong_query_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
 class SyncLog(Base):

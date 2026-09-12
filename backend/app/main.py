@@ -5,7 +5,10 @@ from fastapi import Depends, FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api import accounts, appearance, budgets, categories, conflicts, dashboard, imports, llm, savings_goal, sync, transactions
+from app.api import (
+    accounts, appearance, budgets, categories, conflicts, dashboard, imports, llm, saved_views,
+    savings_goal, sync, transactions,
+)
 from app.auth import require_auth
 from app.db import init_db, session_scope
 from app.llm.router import llm_router
@@ -32,6 +35,7 @@ app.include_router(conflicts.router, dependencies=_auth)
 app.include_router(imports.router, dependencies=_auth)
 app.include_router(appearance.router, dependencies=_auth)
 app.include_router(llm.router, dependencies=_auth)
+app.include_router(saved_views.router, dependencies=_auth)
 
 
 @app.on_event("startup")

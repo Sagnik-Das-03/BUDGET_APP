@@ -1,3 +1,4 @@
+import json
 import re
 import time
 from datetime import date as date_type, timedelta
@@ -15,8 +16,8 @@ from app.repositories.categories import CategoryRepository
 from app.repositories.chat import ChatRepository
 from app.repositories.transactions import TransactionRepository
 from app.schemas import (
-    AskIn, AskOut, AutocompleteIn, AutocompleteOut, CategorizeIn, CategorizeOut,
-    ChatMessageOut, ChatThreadOut, CompareRecapIn, CompareRecapOut, InsightOut,
+    AskIn, AskOut, AskRowOut, AutocompleteIn, AutocompleteOut, CategorizeIn, CategorizeOut,
+    ChatFeedbackIn, ChatMessageOut, ChatThreadOut, CompareRecapIn, CompareRecapOut, InsightOut,
     QuickAddIn, QuickAddOut, SuggestViewNameIn, SuggestViewNameOut,
 )
 
@@ -500,6 +501,21 @@ def delete_chat_thread(thread_id: int, session: Session = Depends(get_session)):
     return {"deleted": True}
 
 
+@router.post("/chat/messages/{message_id}/feedback")
+def chat_feedback(message_id: int, payload: ChatFeedbackIn, session: Session = Depends(get_session)):
+    chat = ChatRepository(session)
+    message = chat.set_feedback(message_id, payload.helpful, payload.note)
+    if not message:
+        raise HTTPException(404, "Message not found")
+    # A thumbs-down becomes a standing correction the NEXT extraction call
+    # sees (see the "Known past mistakes" block in ask()) - the realistic
+    # substitute for fine-tuning a small local model on feedback.
+    if not payload.helpful:
+        chat.add_correction(message.question, message.query_json, payload.note)
+    session.commit()
+    return {"recorded": True}
+
+
 @router.post("/ask", response_model=AskOut)
 def ask(payload: AskIn, session: Session = Depends(get_session)):
     started_at = time.monotonic()
@@ -512,9 +528,9 @@ def ask(payload: AskIn, session: Session = Depends(get_session)):
     if not llm_router.available:
         answer = "AI features aren't available right now."
         duration_sec = time.monotonic() - started_at
-        chat.add_message(thread.id, question, answer, duration_sec)
+        message = chat.add_message(thread.id, question, answer, duration_sec)
         session.commit()
-        return AskOut(answer=answer, range="this_month", thread_id=thread.id, duration_sec=duration_sec)
+        return AskOut(answer=answer, range="this_month", thread_id=thread.id, duration_sec=duration_sec, message_id=message.id)
 
     # Last few exchanges in this thread, so a follow-up like "what about last
     # month?" or "and just food?" can be resolved against what was already
@@ -524,8 +540,22 @@ def ask(payload: AskIn, session: Session = Depends(get_session)):
     prior_messages = chat.list_messages(thread.id)[-5:]
     history_context = "\n".join(f'Q: "{m.question}"\nA: "{m.answer}"' for m in prior_messages)
 
-    categories = [c.name for c in CategoryRepository(session).list()]
     category_repo = CategoryRepository(session)
+    category_objs = category_repo.list()
+    categories = [c.name for c in category_objs]
+    essential_names = [c.name for c in category_objs if c.is_essential]
+    discretionary_names = [c.name for c in category_objs if not c.is_essential]
+
+    # A growing memory of confirmed mistakes (from a thumbs-down on a past
+    # answer, see /chat/messages/{id}/feedback) - not model fine-tuning (not
+    # practical for a small local quantized model), but the realistic form
+    # "learning from feedback" can take here: recent corrections are shown to
+    # the extractor as concrete examples of what NOT to do again.
+    corrections = chat.recent_corrections(limit=5)
+    corrections_context = "\n".join(
+        f'- "{c.question}" - {c.note}' for c in corrections if c.note
+    )
+
     schema = {
         "type": "object",
         "properties": {
@@ -547,6 +577,8 @@ def ask(payload: AskIn, session: Session = Depends(get_session)):
     }
     prompt = (
         (f"Conversation so far in this chat:\n{history_context}\n\n" if history_context else "")
+        + (f"Known past mistakes on similar questions - do not repeat these:\n{corrections_context}\n\n"
+           if corrections_context else "")
         + f"Today's date: {date_type.today().isoformat()}\n"
         + f'New user question: "{question}"\n'
         + "Extract this new question as a structured query, resolving it against the conversation above if it "
@@ -564,7 +596,11 @@ def ask(payload: AskIn, session: Session = Depends(get_session)):
         "question was about \"Food-Order last month\" and the new one is just \"what about this month?\", carry "
         "the category over and only change what the new question actually changed.\n"
         f"Available categories: {', '.join(categories)}.\n"
-        "categories: specific categories the question is about - leave empty for all categories.\n"
+        f"Essential (fixed obligation) categories: {', '.join(essential_names) or '(none)'}.\n"
+        f"Discretionary (flexible spending) categories: {', '.join(discretionary_names) or '(none)'}.\n"
+        "categories: specific categories the question is about - leave empty for all categories. If the "
+        'question asks about "essential"/"fixed" or "discretionary"/"flexible" spending, put ALL of the '
+        "matching list above into categories.\n"
         'exclude_categories: categories to leave out, e.g. "...aside from rent" -> exclude_categories=["Rent"]. '
         "Only set one of categories/exclude_categories, never both.\n"
         "keyword: a specific merchant, item, or note mentioned in the question that ISN'T one of the categories "
@@ -587,9 +623,9 @@ def ask(payload: AskIn, session: Session = Depends(get_session)):
     except Exception as e:
         answer = f"Couldn't understand that question ({e})."
         duration_sec = time.monotonic() - started_at
-        chat.add_message(thread.id, question, answer, duration_sec)
+        message = chat.add_message(thread.id, question, answer, duration_sec)
         session.commit()
-        return AskOut(answer=answer, range="this_month", thread_id=thread.id, duration_sec=duration_sec)
+        return AskOut(answer=answer, range="this_month", thread_id=thread.id, duration_sec=duration_sec, message_id=message.id)
 
     categories_in = [c for c in (parsed.get("categories") or []) if c in categories]
     exclude_in = [c for c in (parsed.get("exclude_categories") or []) if c in categories]
@@ -623,6 +659,13 @@ def ask(payload: AskIn, session: Session = Depends(get_session)):
     elif exclude_in:
         category_ids = [c.id for c in (category_repo.get_by_name(n) for n in exclude_in) if c] or None
         category_exclude = True
+
+    # What was actually extracted for this question - stored on the message so
+    # a later thumbs-down has something concrete to correct against.
+    query_json = json.dumps({
+        "categories": categories_in, "exclude_categories": exclude_in, "transaction_type": ttype,
+        "range_type": range_type, "range_n": range_n, "aggregation": aggregation, "keyword": keyword,
+    })
 
     scope_parts = []
     if categories_in:
@@ -775,8 +818,20 @@ def ask(payload: AskIn, session: Session = Depends(get_session)):
             pass  # fallback_answer already set
 
     duration_sec = time.monotonic() - started_at
-    chat.add_message(thread.id, question, answer, duration_sec)
+    message = chat.add_message(thread.id, question, answer, duration_sec, query_json)
     session.commit()
+
+    # The actual matching rows behind the answer (capped, most recent first -
+    # `rows` is already ordered that way) so you can see exactly what was
+    # found rather than only trusting the phrased sentence.
+    row_outs = [
+        AskRowOut(
+            date=r.date, description=r.description, amount=r.amount,
+            transaction_type=r.transaction_type.value if hasattr(r.transaction_type, "value") else r.transaction_type,
+            category=r.category.name,
+        )
+        for r in rows[:10]
+    ]
 
     if aggregation == "breakdown":
         return AskOut(
@@ -786,6 +841,7 @@ def ask(payload: AskIn, session: Session = Depends(get_session)):
             category=breakdown[0]["category"] if breakdown else None,
             transaction_type=ttype, range=range_key,
             thread_id=thread.id, duration_sec=duration_sec,
+            rows=row_outs, message_id=message.id,
         )
 
     return AskOut(
@@ -795,4 +851,5 @@ def ask(payload: AskIn, session: Session = Depends(get_session)):
         category=categories_in[0] if len(categories_in) == 1 else None,
         transaction_type=ttype, range=range_key,
         thread_id=thread.id, duration_sec=duration_sec,
+        rows=row_outs, message_id=message.id,
     )

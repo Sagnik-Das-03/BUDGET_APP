@@ -40,6 +40,14 @@ export interface Insight {
   range: string;
 }
 
+export interface AskRow {
+  date: string;
+  description: string;
+  amount: number;
+  transaction_type: string;
+  category: string;
+}
+
 export interface AskResponse {
   answer: string;
   amount: number | null;
@@ -49,6 +57,8 @@ export interface AskResponse {
   range: string;
   thread_id: number | null;
   duration_sec: number | null;
+  rows: AskRow[];
+  message_id: number | null;
 }
 
 export interface ChatThread {
@@ -62,6 +72,7 @@ export interface ChatMessage {
   question: string;
   answer: string;
   duration_sec: number | null;
+  feedback: 'up' | 'down' | null;
   created_at: string;
 }
 
@@ -80,6 +91,13 @@ export interface ViewFilters {
   accountExclude: boolean;
   type: string;
   search: string;
+}
+
+export interface SavedView {
+  id: number;
+  name: string;
+  filters: ViewFilters;
+  created_at: string;
 }
 
 export interface QuickAddResult {
