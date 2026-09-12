@@ -18,34 +18,67 @@ rationale - the short version:
   serves the frontend's built output directly, so it's still one process, one
   port (`http://127.0.0.1:8000`) day to day.
 
+## Features
+
+- **Two-way Google Sheets sync**, per user (see below) - your own spreadsheet
+  stays a human-editable mirror of the SQLite source of truth, conflicts
+  surfaced rather than silently overwritten.
+- **Multi-user, fully isolated**: every profile is its own SQLite file, its
+  own optional password, its own Sheets spreadsheet + credentials, and now its
+  own remembered UI state (chart types, page sizes, drawer widths, KPI
+  order) - switching profiles always shows that profile's own views, never
+  whatever the previous one left on screen. See "Multi-user & admin" below.
+- **A dedicated `admin` profile** for user management only - create, delete
+  (with a real confirmation dialog), and see disk usage/transaction counts for
+  every profile. It has no financial data of its own and its nav is
+  restricted to just that page, enforced by route guards, not just a hidden
+  link.
+- **"Ask your budget"**, a local-LLM chat that answers questions against your
+  real transactions - never lets the model do arithmetic (Python computes the
+  exact number, the model only phrases it), shows the actual matching rows it
+  computed from, and knows which profile is asking. It also **learns from
+  👎 feedback** within a session/profile: see "How the self-learning feedback
+  loop works" below.
+- **AI autocomplete/categorization** while entering transactions, and an
+  AI-generated Dashboard insight/anomaly summary - all via small local models
+  (Qwen3 via LiteRT-LM), no cloud calls, no API key required for these.
+- **Runs entirely locally**: one process, one port, a local SQLite file as the
+  source of truth. Google Sheets and the local LLM are both optional add-ons,
+  not requirements to use the app.
+
 ## Architecture
 
 ```mermaid
 flowchart LR
     subgraph Browser
-        FE["React + Vite SPA"]
+        FE["React + Vite SPA<br/>route guards: RequireAdmin /<br/>RequireNonAdmin (App.tsx)"]
+        LS[("localStorage<br/>namespaced by active username<br/>chart types, page sizes, widths, ...")]
     end
 
     subgraph Backend["FastAPI backend — one process, :8000"]
         API["REST/JSON API<br/>(app/api/*)"]
         CALC["dashboard/calculations.py<br/>every number shown anywhere"]
-        LLMR["LLM router<br/>(app/llm)<br/>on-demand load + status"]
-        SYNC["sync engine + scheduler<br/>(app/sync)"]
+        LLMR["LLM router<br/>(app/llm)<br/>on-demand load + status<br/>knows the active username"]
+        SYNC["sync engine + scheduler<br/>(app/sync)<br/>per-user spreadsheet + credentials cache"]
     end
 
-    REG[("users_registry.json<br/>username → db file")]
-    DB[("SQLite<br/>ONE active user's file<br/>+ chat history")]
-    SHEETS[("Google Sheets<br/>human-editable mirror")]
+    REG[("users_registry.json<br/>username → db file, password hash")]
+    DB[("SQLite<br/>ONE active user's file<br/>+ chat history + that user's<br/>own spreadsheet_id setting")]
+    CREDS[("data/credentials/&lt;username&gt;.json<br/>per-user service account key<br/>(optional - falls back to .env)")]
+    SHEETS[("Google Sheets<br/>THAT user's own spreadsheet<br/>human-editable mirror")]
     MODELS[["Local models<br/>Qwen3 0.6B / 4B-int4<br/>via LiteRT-LM"]]
 
     FE <-->|HTTP JSON| API
+    FE <-.->|read/write, key namespaced| LS
     API --> CALC
     API -->|"1. extract query (JSON)<br/>2. Python computes exact answer<br/>3. phrase in words"| LLMR
     API <--> DB
-    API -.->|"switch active user<br/>(admin-gated)"| REG
-    REG -.->|resolves at startup / on switch| DB
+    API -.->|"create/delete user (admin-gated)<br/>switch active user"| REG
+    REG -.->|resolves at startup / on switch<br/>old engine disposed after new is live| DB
     CALC --> DB
     LLMR --> MODELS
+    SYNC -.->|reload_for_active_user() on switch| DB
+    SYNC -.->|falls back to shared .env key<br/>if this user has none| CREDS
     SYNC <-->|two-way, ID-based| SHEETS
     SYNC <--> DB
 ```
@@ -178,6 +211,23 @@ being able to see their own data (by design; there's no cross-user anything).
   delete the currently active user or the last remaining one, and removes the
   actual `.db` file on disk, not just the
   registry entry.
+- **Admin's restriction is enforced by route guards, not just a hidden nav
+  link.** `RequireNonAdmin`/`RequireAdmin` (`frontend/src/App.tsx`) wrap every
+  route: typing/pasting `/settings` (or any other page) while `admin` is
+  active redirects straight back to `/admin` instead of rendering it - this
+  matters because Settings includes the Google Sheets card, which is
+  meaningless for a profile with no transactions or spreadsheet of its own.
+  The same guard redirects any *non*-admin profile away from `/admin` too.
+- **UI view state (chart types, page sizes, drawer widths, KPI tile order,
+  the transactions edit-lock) resets to each profile's own values on
+  switch**, not the previous profile's. `useLocalStorage`
+  (`frontend/src/lib/useLocalStorage.ts`) namespaces every key by the
+  currently active username under the hood, so every existing call site got
+  this for free with no per-component changes - switching users changes the
+  namespace, which re-reads (or defaults) that profile's own value instead of
+  showing whatever the last-active profile had on screen. (Dark/light theme
+  is deliberately the one exception left un-namespaced - that's a
+  per-browser preference, not a "view" of a specific user's data.)
 
 ## Data model
 
@@ -303,7 +353,7 @@ above), not a record tied to one specific past conversation.
    fresh (a ~10-20s pip install) the next time you launch it.
    `frontend/node_modules` and `frontend/dist` are **not** deleted - npm
    installs are slow, so only the Python venv gets the fresh-each-launch
-   treatment. `.env` and `data/budget_tracker.db` are untouched either way.
+   treatment. `.env` and `data/*.db` are untouched either way.
 
 ## Running with Docker (alternative to `run.bat`)
 
@@ -354,7 +404,7 @@ budget_tracker/
     tests/                         pytest suite - fake Sheets adapter, in-memory SQLite
     docs/service_account_setup.md
     data/
-      budget_tracker.db, demo.db, admin.db, ...   one file per user
+      sagnik.db, demo.db, admin.db, ...             one file per user, named `{username}.db`
       users_registry.json                          username → db file, active user, password hashes
   frontend/
     src/
@@ -373,7 +423,7 @@ python scripts/seed_from_existing_xlsx.py "../../Monthly Budget Sagnik Das.xlsx"
 ```
 This only needs to run once - re-running it against the same file will create
 duplicate transactions (it always assigns fresh IDs), so don't re-run it
-unless you first clear `backend/data/budget_tracker.db`.
+unless you first clear `backend/data/sagnik.db`.
 
 ## Everyday use
 
