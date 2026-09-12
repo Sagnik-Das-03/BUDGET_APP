@@ -86,27 +86,13 @@ export function Admin() {
   return (
     <>
       <h1 className="text-2xl font-bold tracking-tight">Admin</h1>
-      <p className="mb-5 mt-1 text-sm text-muted-foreground">
+      <p className="mb-6 mt-1 text-sm text-muted-foreground">
         Manage user profiles - each one is a fully separate database, with its own (optional)
         Google Sheet.
       </p>
 
-      <Card className="mb-6 max-w-xs p-4">
-        <Label htmlFor="admin-authorize-pw" className="text-sm font-semibold">Authorize</Label>
-        <p className="mb-3 mt-1 text-xs text-muted-foreground">
-          Required below to create or delete a user, if a password is set (see "Admin password").
-        </p>
-        <Input
-          id="admin-authorize-pw"
-          type="password"
-          placeholder="Admin password"
-          value={adminPassword}
-          onChange={(e) => setAdminPassword(e.target.value)}
-        />
-      </Card>
-
       {stats.data && (
-        <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4 sm:max-w-2xl">
+        <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
           <Card className="p-4">
             <div className="text-xs font-medium uppercase text-muted-foreground">Total users</div>
             <div className="mt-1 text-2xl font-bold">{stats.data.total_users}</div>
@@ -126,7 +112,7 @@ export function Admin() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_320px]">
+      <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-[1fr_320px]">
         <div>
           <Card className="p-0">
             <Table>
@@ -171,6 +157,20 @@ export function Admin() {
         </div>
 
         <div className="flex flex-col gap-5">
+          <Card className="p-4">
+            <Label htmlFor="admin-authorize-pw" className="text-sm font-semibold">Authorize</Label>
+            <p className="mb-3 mt-1 text-xs text-muted-foreground">
+              Required to create or delete a user below, if a password is set (see "Admin password").
+            </p>
+            <Input
+              id="admin-authorize-pw"
+              type="password"
+              placeholder="Admin password"
+              value={adminPassword}
+              onChange={(e) => setAdminPassword(e.target.value)}
+            />
+          </Card>
+
           <Card className="p-4">
             <h2 className="mb-3 text-sm font-semibold">Create a new user</h2>
             <div className="flex flex-col gap-2.5">

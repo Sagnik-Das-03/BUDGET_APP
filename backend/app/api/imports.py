@@ -109,7 +109,13 @@ def preview_csv(file: UploadFile = File(...), session: Session = Depends(get_ses
             unresolved.append(len(guesses) - 1)
 
     if unresolved:
-        categories = [c.name for c in CategoryRepository(session).list()]
+        # "Income" is excluded here: these rows are already known Expense-type
+        # (income rows always resolve to the literal "Income" guess up front
+        # and never reach this tier - see csv_parser._guess_category), so
+        # offering it as a pickable category just invites the model to
+        # mislabel an expense as income. Mirrors the regex rules' own
+        # Income/Expense split, which never lets a pattern match into Income.
+        categories = [c.name for c in CategoryRepository(session).list() if c.name != "Income"]
         for start in range(0, len(unresolved), LLM_CATEGORIZE_BATCH_SIZE):
             batch_indices = unresolved[start:start + LLM_CATEGORIZE_BATCH_SIZE]
             batch_guesses = _llm_categorize_batch([result.rows[i].description for i in batch_indices], categories)
