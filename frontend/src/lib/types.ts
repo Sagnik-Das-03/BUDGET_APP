@@ -1,3 +1,8 @@
+export interface AppUser {
+  username: string;
+  is_active: boolean;
+}
+
 export interface Category {
   id: number;
   name: string;

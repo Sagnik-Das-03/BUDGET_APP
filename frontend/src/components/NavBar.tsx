@@ -6,6 +6,7 @@ import {
 import { cn } from '@/lib/utils';
 import { SyncStatusWidget } from './SyncStatus';
 import { ModeToggle } from './ModeToggle';
+import { UserSwitcher } from './UserSwitcher';
 
 const LINKS = [
   { to: '/', label: 'Dashboard', end: true, icon: LayoutDashboard },
@@ -47,6 +48,7 @@ export function NavBar() {
         ))}
       </nav>
       <div className="flex flex-col gap-2.5 border-t px-3 py-3">
+        <UserSwitcher />
         <SyncStatusWidget />
         <ModeToggle />
       </div>

@@ -7,7 +7,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api import (
     accounts, appearance, budgets, categories, conflicts, dashboard, imports, llm, saved_views,
-    savings_goal, sync, transactions,
+    savings_goal, sync, transactions, users,
 )
 from app.auth import require_auth
 from app.db import init_db, session_scope
@@ -36,6 +36,7 @@ app.include_router(imports.router, dependencies=_auth)
 app.include_router(appearance.router, dependencies=_auth)
 app.include_router(llm.router, dependencies=_auth)
 app.include_router(saved_views.router, dependencies=_auth)
+app.include_router(users.router, dependencies=_auth)
 
 
 @app.on_event("startup")

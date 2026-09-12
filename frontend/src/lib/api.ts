@@ -1,5 +1,5 @@
 import type {
-  Account, AskResponse, Budget, BudgetAlert, BudgetVsActual, Category, CategoryDrilldownNode,
+  Account, AppUser, AskResponse, Budget, BudgetAlert, BudgetVsActual, Category, CategoryDrilldownNode,
   CategoryTotal, CategoryTrend, CategoryVolatility, ChartPalette, ChatMessage, ChatThread, ConflictRow,
   EssentialSplit, Highlights, ImportCommitResult, ImportPreviewResult, ImportRowIn, Insight, LlmStatus,
   MonthlyBreakdownRow, QuickAddResult, SavedView, SavingsGoalProgress, SavingsStreak, SpendConcentration,
@@ -168,6 +168,13 @@ export const api = {
     request<SavedView>('/api/saved_views', { method: 'POST', body: JSON.stringify({ name, filters }) }),
   deleteSavedView: (id: number) =>
     request<{ deleted: boolean }>(`/api/saved_views/${id}`, { method: 'DELETE' }),
+
+  // ---------- users ----------
+  listUsers: () => request<AppUser[]>('/api/users'),
+  createUser: (username: string, seedDemoData = false) =>
+    request<AppUser>('/api/users', { method: 'POST', body: JSON.stringify({ username, seed_demo_data: seedDemoData }) }),
+  activateUser: (username: string) =>
+    request<AppUser>(`/api/users/${encodeURIComponent(username)}/activate`, { method: 'POST' }),
 
   // ---------- appearance ----------
   getPalette: () => request<ChartPalette>('/api/appearance/palette'),
