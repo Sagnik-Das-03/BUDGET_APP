@@ -201,6 +201,13 @@ export const api = {
     request<{ updated: boolean }>(`/api/users/${encodeURIComponent(username)}/set_password`, {
       method: 'POST', body: JSON.stringify({ new_password: newPassword, old_password: oldPassword || null }),
     }),
+  // Admin's reset for a user who forgot their own password - unlike
+  // setUserPassword, this needs the ADMIN account's password, not the
+  // target user's old one.
+  clearUserPassword: (username: string, adminPassword?: string) =>
+    request<{ updated: boolean }>(`/api/users/${encodeURIComponent(username)}/clear_password`, {
+      method: 'POST', body: JSON.stringify({ admin_password: adminPassword || null }),
+    }),
 
   // ---------- appearance ----------
   getPalette: () => request<ChartPalette>('/api/appearance/palette'),
@@ -209,15 +216,56 @@ export const api = {
   resetPalette: () => request<ChartPalette>('/api/appearance/palette', { method: 'DELETE' }),
 
   // ---------- csv import ----------
-  importPreview: async (file: File) => {
+  // Streams newline-delimited JSON progress events (see app/api/imports.py's
+  // _stream_preview) instead of one big JSON response, since the batched LLM
+  // categorization step for rows the regex rules couldn't place can take a
+  // real, visible while - onProgress lets the caller show an accurate bar
+  // instead of a blind spinner for that part.
+  importPreview: async (
+    file: File,
+    onProgress?: (processed: number, total: number) => void,
+  ): Promise<ImportPreviewResult> => {
     const formData = new FormData();
     formData.append('file', file);
     const res = await fetch('/api/imports/csv/preview', { method: 'POST', body: formData });
     if (!res.ok) {
       const body = await res.text();
-      throw new Error(`${res.status}: ${body}`);
+      let message = body;
+      try {
+        const parsed = JSON.parse(body);
+        if (parsed && typeof parsed.detail === 'string') message = parsed.detail;
+      } catch {
+        // not JSON - fall back to the raw body text as-is
+      }
+      throw new Error(message);
     }
-    return res.json() as Promise<ImportPreviewResult>;
+    const reader = res.body?.getReader();
+    if (!reader) throw new Error('Streaming responses are not supported in this browser');
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let result: ImportPreviewResult | null = null;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let newlineAt: number;
+      while ((newlineAt = buffer.indexOf('\n')) >= 0) {
+        const line = buffer.slice(0, newlineAt).trim();
+        buffer = buffer.slice(newlineAt + 1);
+        if (!line) continue;
+        const event = JSON.parse(line);
+        if (event.type === 'start') {
+          onProgress?.(0, event.unresolved);
+        } else if (event.type === 'progress') {
+          onProgress?.(event.processed, event.total);
+        } else if (event.type === 'done') {
+          result = { rows: event.rows, skipped_rows: event.skipped_rows, detected_columns: event.detected_columns };
+        }
+      }
+    }
+    if (!result) throw new Error('Import preview ended without a result');
+    return result;
   },
   importCommit: (rows: ImportRowIn[]) =>
     request<ImportCommitResult>('/api/imports/csv/commit', { method: 'POST', body: JSON.stringify({ rows }) }),

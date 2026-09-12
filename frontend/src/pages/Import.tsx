@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Progress } from '@/components/ui/progress';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 
@@ -25,12 +26,19 @@ export function Import() {
   const [rowStates, setRowStates] = useState<RowState[] | null>(null);
   const [meta, setMeta] = useState<Pick<ImportPreviewResult, 'skipped_rows'> | null>(null);
   const [result, setResult] = useState<{ created_count: number } | null>(null);
+  // null while still parsing/tiering (regex + exact-match, effectively
+  // instant); once set, `total` is how many rows needed an LLM guess - 0
+  // means nothing did, so the whole import finishes right away.
+  const [progress, setProgress] = useState<{ processed: number; total: number } | null>(null);
 
   const categories = useQuery({ queryKey: ['categories'], queryFn: api.listCategories });
   const accounts = useQuery({ queryKey: ['accounts'], queryFn: api.listAccounts });
 
   const preview = useMutation({
-    mutationFn: (file: File) => api.importPreview(file),
+    mutationFn: (file: File) => {
+      setProgress(null);
+      return api.importPreview(file, (processed, total) => setProgress({ processed, total }));
+    },
     onSuccess: (data) => {
       setResult(null);
       setMeta({ skipped_rows: data.skipped_rows });
@@ -40,6 +48,7 @@ export function Import() {
         category: row.category_guess,
       })));
     },
+    onSettled: () => setProgress(null),
   });
 
   const commit = useMutation({
@@ -95,7 +104,20 @@ export function Import() {
             onChange={onFileChange}
             className="text-sm file:mr-3 file:rounded-md file:border file:border-input file:bg-transparent file:px-3 file:py-1.5 file:text-sm file:font-medium file:hover:bg-accent"
           />
-          {preview.isPending && <span className="text-sm text-muted-foreground">Parsing…</span>}
+          {preview.isPending && (
+            <div className="flex min-w-55 flex-1 items-center gap-2.5">
+              {progress && progress.total > 0 ? (
+                <>
+                  <Progress value={(progress.processed / progress.total) * 100} className="h-1.5 max-w-50" />
+                  <span className="whitespace-nowrap text-xs text-muted-foreground">
+                    Categorizing {progress.processed}/{progress.total}…
+                  </span>
+                </>
+              ) : (
+                <span className="text-sm text-muted-foreground">Parsing…</span>
+              )}
+            </div>
+          )}
           {preview.isError && <span className="text-sm text-destructive">{(preview.error as Error).message}</span>}
           {result && (
             <Badge variant="outline" className="text-emerald-600 dark:text-emerald-400">

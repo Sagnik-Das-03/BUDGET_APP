@@ -172,6 +172,18 @@ def set_password(username: str, payload: SetPasswordIn):
     return {"updated": True}
 
 
+@router.post("/{username}/clear_password")
+def clear_password(username: str, admin_password: Optional[str] = Body(default=None, embed=True)):
+    """Admin's password-RESET for a user who forgot theirs - gated by the
+    admin account's own password (same check as create/delete), not by
+    knowing the target user's old password like set_password requires."""
+    _require_admin(admin_password)
+    if not registry.exists(username):
+        raise HTTPException(404, f"User {username!r} not found")
+    registry.clear_password(username)
+    return {"updated": True}
+
+
 @router.delete("/{username}")
 def delete_user(username: str, admin_password: Optional[str] = Body(default=None, embed=True)):
     _require_admin(admin_password)

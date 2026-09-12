@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
-import { Trash2 } from 'lucide-react';
+import { KeyRound, Trash2 } from 'lucide-react';
 import { api } from '../lib/api';
 import { useConfirmDialog } from '../lib/useConfirmDialog';
 import { Button } from '@/components/ui/button';
@@ -59,6 +59,11 @@ export function Admin() {
     onSuccess: invalidateUserQueries,
   });
 
+  const clearPassword = useMutation({
+    mutationFn: (username: string) => api.clearUserPassword(username, adminPassword || undefined),
+    onSuccess: invalidateUserQueries,
+  });
+
   const admin = stats.data?.users.find((u) => u.username.toLowerCase() === 'admin');
   const changeAdminPw = useMutation({
     mutationFn: () => api.setUserPassword(admin!.username, nextAdminPw, currentAdminPw || undefined),
@@ -79,6 +84,14 @@ export function Admin() {
       { title: 'Delete user', confirmLabel: 'Delete' },
     );
     if (ok) del.mutate(username);
+  }
+
+  async function handleClearPassword(username: string) {
+    const ok = await confirm(
+      `Remove the password for "${username}"? Anyone will be able to switch into that profile without one until a new password is set.`,
+      { title: 'Reset password', confirmLabel: 'Remove password' },
+    );
+    if (ok) clearPassword.mutate(username);
   }
 
   const users = stats.data?.users ?? [];
@@ -138,15 +151,28 @@ export function Admin() {
                     <TableCell>{fmtBytes(u.db_size_bytes)}</TableCell>
                     <TableCell className="text-muted-foreground">{u.has_password ? 'Set' : '—'}</TableCell>
                     <TableCell className="text-right">
-                      <Button
-                        variant="ghost" size="icon" className="text-muted-foreground hover:text-destructive"
-                        disabled={u.is_active || users.length <= 1 || del.isPending}
-                        title={u.is_active ? "Can't delete the currently active user" : 'Delete user'}
-                        onClick={() => handleDelete(u.username)}
-                        aria-label={`Delete ${u.username}`}
-                      >
-                        <Trash2 className="size-4" />
-                      </Button>
+                      <div className="flex justify-end gap-1">
+                        {u.has_password && (
+                          <Button
+                            variant="ghost" size="icon" className="text-muted-foreground hover:text-foreground"
+                            disabled={clearPassword.isPending}
+                            title={`Reset ${u.username}'s password`}
+                            onClick={() => handleClearPassword(u.username)}
+                            aria-label={`Reset ${u.username}'s password`}
+                          >
+                            <KeyRound className="size-4" />
+                          </Button>
+                        )}
+                        <Button
+                          variant="ghost" size="icon" className="text-muted-foreground hover:text-destructive"
+                          disabled={u.is_active || users.length <= 1 || del.isPending}
+                          title={u.is_active ? "Can't delete the currently active user" : 'Delete user'}
+                          onClick={() => handleDelete(u.username)}
+                          aria-label={`Delete ${u.username}`}
+                        >
+                          <Trash2 className="size-4" />
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -154,6 +180,9 @@ export function Admin() {
             </Table>
           </Card>
           {del.isError && <p className="mt-3 text-sm text-destructive">{(del.error as Error).message}</p>}
+          {clearPassword.isError && (
+            <p className="mt-3 text-sm text-destructive">{(clearPassword.error as Error).message}</p>
+          )}
         </div>
 
         <div className="flex flex-col gap-5">

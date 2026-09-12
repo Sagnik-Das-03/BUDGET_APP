@@ -98,6 +98,21 @@ class UserRegistry:
                 return
         raise ValueError(f"User {username!r} not found")
 
+    def clear_password(self, username: str) -> None:
+        """Removes a user's password entirely, putting that profile back to
+        the default "open" state (see verify_password's docstring above).
+        This is admin's password-RESET for a user who forgot theirs - unlike
+        set_password(), it doesn't require knowing the old password; it's
+        gated instead by _require_admin() in app/api/users.py, the same
+        admin-account check that gates creating/deleting a user."""
+        data = self._load()
+        for u in data["users"]:
+            if u["username"] == username:
+                u.pop("password_hash", None)
+                self._save(data)
+                return
+        raise ValueError(f"User {username!r} not found")
+
     @staticmethod
     def validate_username(username: str) -> None:
         if not _USERNAME_RE.match(username):

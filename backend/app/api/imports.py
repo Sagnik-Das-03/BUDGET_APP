@@ -1,11 +1,13 @@
+import json
 import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.db import get_session
-from app.imports.csv_parser import CsvParseError, parse_csv
+from app.imports.csv_parser import CsvParseError, ParseResult, parse_csv
 from app.llm.router import llm_router
 from app.models import TransactionSource, TransactionType
 from app.repositories.accounts import AccountRepository
@@ -75,22 +77,15 @@ def _llm_categorize_batch(descriptions: list[str], categories: list[str]) -> Opt
         return None
 
 
-@router.post("/csv/preview", response_model=ImportPreviewOut)
-def preview_csv(file: UploadFile = File(...), session: Session = Depends(get_session)):
-    # Sync def, not async - FastAPI runs this in its threadpool instead of
-    # the event loop, since batched LLM calls below can take a real while and
-    # must not block every other request in the meantime (`file.file.read()`
-    # is UploadFile's underlying sync file object; `await file.read()` isn't
-    # available outside an async def).
-    content = file.file.read()
-    if len(content) > MAX_UPLOAD_BYTES:
-        raise HTTPException(400, "File too large (max 5 MB)")
-
-    try:
-        result = parse_csv(content)
-    except CsvParseError as exc:
-        raise HTTPException(400, str(exc))
-
+def _stream_preview(result: ParseResult, session: Session):
+    """NDJSON event generator: one JSON object per line, so the frontend can
+    show a real, live progress bar for the slow part (batched LLM calls)
+    instead of a blind wait - a personal bank statement's regex/exact-match
+    tiers below are effectively instant, but however many rows are left over
+    for the LLM can take a real, visible while (see LLM_CATEGORIZE_BATCH_SIZE).
+    A plain sync generator, not async - Starlette's StreamingResponse runs it
+    via iterate_in_threadpool, so the blocking LLM calls inside don't stall
+    the event loop for other requests meanwhile."""
     tx_repo = TransactionRepository(session)
 
     # Three tiers, cheapest/most-confident first:
@@ -108,6 +103,8 @@ def preview_csv(file: UploadFile = File(...), session: Session = Depends(get_ses
         if not exact and row.category_guess == "Other":
             unresolved.append(len(guesses) - 1)
 
+    yield json.dumps({"type": "start", "total_rows": len(result.rows), "unresolved": len(unresolved)}) + "\n"
+
     if unresolved:
         # "Income" is excluded here: these rows are already known Expense-type
         # (income rows always resolve to the literal "Income" guess up front
@@ -116,14 +113,16 @@ def preview_csv(file: UploadFile = File(...), session: Session = Depends(get_ses
         # mislabel an expense as income. Mirrors the regex rules' own
         # Income/Expense split, which never lets a pattern match into Income.
         categories = [c.name for c in CategoryRepository(session).list() if c.name != "Income"]
+        processed = 0
         for start in range(0, len(unresolved), LLM_CATEGORIZE_BATCH_SIZE):
             batch_indices = unresolved[start:start + LLM_CATEGORIZE_BATCH_SIZE]
             batch_guesses = _llm_categorize_batch([result.rows[i].description for i in batch_indices], categories)
-            if batch_guesses is None:
-                continue  # keep "Other" for this whole batch
-            for idx, guess in zip(batch_indices, batch_guesses):
-                if guess:
-                    guesses[idx] = guess
+            if batch_guesses is not None:
+                for idx, guess in zip(batch_indices, batch_guesses):
+                    if guess:
+                        guesses[idx] = guess
+            processed += len(batch_indices)
+            yield json.dumps({"type": "progress", "processed": processed, "total": len(unresolved)}) + "\n"
 
     out_rows = []
     for row, category_guess in zip(result.rows, guesses):
@@ -133,8 +132,25 @@ def preview_csv(file: UploadFile = File(...), session: Session = Depends(get_ses
             transaction_type=row.transaction_type, category_guess=category_guess,
             is_duplicate=bool(dupes), duplicate_of=dupes[0].transaction_id if dupes else None,
         ))
+    preview = ImportPreviewOut(rows=out_rows, skipped_rows=result.skipped_rows, detected_columns=result.detected_columns)
+    yield json.dumps({"type": "done", **preview.model_dump(mode="json")}) + "\n"
 
-    return ImportPreviewOut(rows=out_rows, skipped_rows=result.skipped_rows, detected_columns=result.detected_columns)
+
+@router.post("/csv/preview")
+def preview_csv(file: UploadFile = File(...), session: Session = Depends(get_session)):
+    # Sync def, not async - FastAPI runs this in its threadpool instead of
+    # the event loop (`file.file.read()` is UploadFile's underlying sync file
+    # object; `await file.read()` isn't available outside an async def).
+    content = file.file.read()
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(400, "File too large (max 5 MB)")
+
+    try:
+        result = parse_csv(content)
+    except CsvParseError as exc:
+        raise HTTPException(400, str(exc))
+
+    return StreamingResponse(_stream_preview(result, session), media_type="application/x-ndjson")
 
 
 @router.post("/csv/commit", response_model=ImportCommitOut)
