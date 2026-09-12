@@ -132,14 +132,16 @@ class UserRegistry:
             data["active"] = data["users"][0]["username"] if data["users"] else None
         self._save(data)
 
-    def ensure_bootstrapped(self, default_username: str, default_db_filename: str) -> None:
-        """First-run migration: if the registry doesn't exist yet, register
-        the classic single-user database file under `default_username`
-        WITHOUT moving, renaming, or otherwise touching that file - the
-        pre-existing database becomes user #1 as-is."""
+    def ensure_admin_exists(self) -> None:
+        """First-run bootstrap: if the registry doesn't exist yet, a brand
+        new install starts with just the `admin` profile, active - admin has
+        no financial data of its own, so a fresh install lands on an empty
+        user-management screen rather than silently activating a named
+        financial profile nobody has created yet. Create your own profile
+        from the Admin page from there."""
         if self.path.exists():
             return
-        self._save({"active": default_username, "users": [{"username": default_username, "db_file": default_db_filename}]})
+        self._save({"active": ADMIN_USERNAME, "users": [{"username": ADMIN_USERNAME, "db_file": f"{ADMIN_USERNAME}.db"}]})
 
 
 registry = UserRegistry()

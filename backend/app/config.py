@@ -22,7 +22,6 @@ class Settings(BaseSettings):
     # HTTP Basic Auth - off by default. Set both to turn it on (see docs).
     auth_username: str = ""
     auth_password: str = ""
-    db_path: str = "data/budget_tracker.db"
     app_host: str = "127.0.0.1"
     app_port: int = 8000
     # Directory holding .litertlm model files for local AI features (see app/llm/).
@@ -30,20 +29,10 @@ class Settings(BaseSettings):
     lite_llm_models_dir: str = ""
 
     @property
-    def db_url(self) -> str:
-        db_file = (BASE_DIR / self.db_path).resolve()
-        db_file.parent.mkdir(parents=True, exist_ok=True)
-        return f"sqlite:///{db_file}"
-
-    @property
     def lite_llm_dir(self) -> Path:
         if self.lite_llm_models_dir:
             return Path(self.lite_llm_models_dir)
         return BASE_DIR / "models"
-
-    @property
-    def credentials_configured(self) -> bool:
-        return bool(self.google_service_account_key_path) and Path(self.google_service_account_key_path).exists()
 
     @property
     def auth_enabled(self) -> bool:

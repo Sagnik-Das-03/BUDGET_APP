@@ -4,9 +4,15 @@ from pathlib import Path
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
-from app.config import BASE_DIR, settings
-from app.user_registry import registry
+from app.config import BASE_DIR
+from app.user_registry import ADMIN_USERNAME, registry
 
+# Historical: the username the original single-user install's database was
+# migrated under, the one time that ever happened for this install. Only
+# still referenced by the one-time legacy spreadsheet-id migration gate in
+# app/sync/scheduler.py - a brand new install no longer creates this user at
+# all (see UserRegistry.ensure_admin_exists), so that migration simply never
+# fires for anyone but the already-migrated profile it already applied to.
 DEFAULT_USERNAME = "Sagnik"
 
 
@@ -42,13 +48,13 @@ def delete_db_file(db_file: str) -> None:
 
 def _initial_db_path() -> Path:
     """Which SQLite file this process opens at startup: the active user from
-    the registry, bootstrapping the registry from the classic single-user
-    db_path setting on first run - the existing database becomes user #1
-    (DEFAULT_USERNAME) exactly where it already is, untouched."""
-    registry.ensure_bootstrapped(DEFAULT_USERNAME, Path(settings.db_path).name)
+    the registry, bootstrapping the registry with just the `admin` profile
+    on a truly fresh install (no registry file yet) - see
+    UserRegistry.ensure_admin_exists."""
+    registry.ensure_admin_exists()
     active = registry.get_active()
     db_file = registry.get_db_file(active) if active else None
-    return _db_path_for(db_file or Path(settings.db_path).name)
+    return _db_path_for(db_file or f"{ADMIN_USERNAME}.db")
 
 
 engine = create_engine(f"sqlite:///{_initial_db_path()}", connect_args={"check_same_thread": False})

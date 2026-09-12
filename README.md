@@ -162,14 +162,17 @@ being able to see their own data (by design; there's no cross-user anything).
   needing to know it happened. The *previous* engine is disposed only after
   the new one is confirmed live, specifically because a lingering pooled
   connection left on the old SQLite file blocks deleting that file on Windows.
-- **The original single-user database was migrated automatically**, not by
-  hand: the first time the registry doesn't exist yet, it's created pointing
-  at whatever `db_path` already resolved to, under a default username - the
-  file itself is never moved, renamed, or rewritten by this migration (a
-  later manual rename, e.g. to match the `{username}.db` convention every
-  user created since uses, just needs the registry's `db_file` entry updated
-  to match - the server must be stopped first, since Windows won't let you
-  rename a file a live SQLite connection still has open).
+- **A brand new install starts on `admin`, alone, with nothing configured -
+  not even Sheets.** The first time `users_registry.json` doesn't exist yet
+  (`UserRegistry.ensure_admin_exists()`), it's created with exactly one user,
+  `admin`, active - no financial profile, no spreadsheet, no credentials.
+  You create your first real profile from the Admin page, at which point
+  `create_empty_db()` registers it and creates its own empty `.db` file (see
+  below) - `admin` itself never gains transactions of its own. (This
+  install's original single-user database went through an earlier, one-time
+  version of this bootstrap that adopted the pre-existing file under a named
+  profile instead - that migration only ever ran once and doesn't apply to
+  new installs going forward.)
 - **Creating a user never touches the active session.** `create_empty_db()`
   and `session_for()` open a throwaway engine bound to the *new* file,
   seed it (default categories/account, optionally `demo_data.py`'s synthetic
@@ -343,11 +346,17 @@ above), not a record tied to one specific past conversation.
    backend, installs dependencies, creates `backend/.env` from
    `backend/.env.example` (first run only), and opens
    http://127.0.0.1:8000 in your browser.
-2. The Dashboard and Transactions pages work immediately from the seeded
-   historical data - no Google account needed yet.
+2. A brand new install lands you on the `admin` profile - no financial data,
+   no nav besides Admin, by design (see "Multi-user & admin"). Use the "New
+   user" button there (bottom of the left nav) to create your own profile -
+   no password required unless you want one - then switch into it. Dashboard
+   and Transactions work immediately from there - no Google account needed
+   yet.
 3. When you're ready to turn on sync, follow `backend/docs/service_account_setup.md`
-   (about 5 minutes), then edit `backend/.env` with your credentials path and
-   restart `run.bat`.
+   (about 5 minutes) to get a service account key, then upload it and set
+   your spreadsheet ID from **Settings -> Google Sheets sync**, from inside
+   your own profile (not `admin`, which has no Settings page). No restart or
+   `.env` edit needed - it's saved straight into that profile.
 4. **To stop**: close the console window or press Ctrl+C in it. `run.bat`
    deletes `backend/.venv` on the way out to save disk space, and rebuilds it
    fresh (a ~10-20s pip install) the next time you launch it.
@@ -478,3 +487,100 @@ network calls, no real Google credentials needed.
 (`py -3.13`), independent of whatever else is installed on this machine -
 including the Python 3.9 install used by other projects here, which is
 untouched and unaffected by anything in this repo.
+
+## Known limitations, tradeoffs & future directions
+
+Every design choice here was made for what this app actually is - a personal,
+single-machine tool, not a hosted multi-tenant product - and would need
+revisiting if that ever changed.
+
+**Single active user per process, not per session.** Switching users rebinds
+the whole process's database connection (`switch_active_db()`) - there's no
+concept of "this browser tab is Sagnik, that one is demo" at the same time.
+Two tabs open as different people fight over the same active profile, and a
+request that lands mid-switch could theoretically read against the wrong
+engine for an instant. Fine for one person on one machine; a real blocker for
+several people using the same running instance concurrently. Fixing this
+properly means per-request/session auth (a token or cookie identifying the
+user on every request) instead of a process-global "active user" flag - a
+significant rework, not a small patch.
+
+**A password gates *switching into* a profile, not standing sessions.**
+There's no login token or cookie - "being" a user is just whichever profile
+the shared process currently has active. Anyone at the machine (or on the
+network, if `APP_HOST` is ever bound beyond `127.0.0.1`) can attempt to
+switch into any profile; a password only stops the switch from completing,
+with no rate-limiting or lockout on attempts. A password-less profile is
+wide open by design (see "Multi-user & admin"). This is an acceptable
+tradeoff for a single-machine tool behind your own login, not a real
+authentication system.
+
+**File-per-user isolation is simple but doesn't scale or share.** Each
+profile is a fully separate SQLite file - strong isolation, trivial backup
+(copy one file), but no cross-profile queries (no combined household
+dashboard across two profiles), no shared categories/accounts (every new
+profile starts from the same seeded defaults, independently), and schema
+migrations only apply to whichever file is active at the moment
+(`_add_missing_columns()` in `app/db.py` runs at startup against the *active*
+engine only - a profile that hasn't been switched into since a schema change
+picks up the new column the next time it's activated, not immediately). More
+profiles also means more files to individually keep an eye on for growth,
+corruption, or backup coverage - there's no single place that covers all of
+them at once. `users_registry.json` itself has no locking, but a single
+Uvicorn worker process makes that a non-issue today.
+
+**Sync is polling-based and best-effort, not real-time or transactional.**
+The scheduler wakes up every `SYNC_INTERVAL_SECONDS` rather than reacting to
+a push/webhook from Sheets, so a manual edit there can take up to that long
+to show up (or "Sync Now" to force it). Conflicts are surfaced for a human
+to resolve (Keep App / Keep Sheets), not auto-merged - correct for a
+personal ledger where a wrong automatic merge is worse than a manual click,
+but real latency and manual effort compared to a proper OT/CRDT sync engine.
+
+**Local LLM features have a real quality ceiling.** Qwen3 0.6B/4B
+(quantized, via LiteRT-LM) is nowhere near a frontier cloud model - the
+extraction step in "Ask your budget" can misparse an oddly-phrased question,
+and there's no way to point it at a larger model without a much beefier
+machine. The tradeoff is deliberate: zero API keys, zero cloud calls, zero
+per-query cost, works fully offline - but a "just ask it anything" complex
+question is a place it will still stumble compared to raising the ceiling
+with a cloud model as an opt-in.
+
+**No automated backups beyond Sheets acting as a secondary mirror.** Losing a
+profile's `.db` file (disk failure, an accidental delete) loses that
+profile's data outright unless a manual copy was made or its own Sheets sync
+was up to date - sync is a mirror, not a guaranteed durable backup.
+
+**Frontend ships as one JS bundle** (~1.8MB, per Vite's own build warning) -
+irrelevant for a local app on localhost, but it means no meaningful
+code-splitting exists yet if this were ever served over a slower connection.
+
+### Ideas for future expansion
+
+- **Per-session auth** (a real login token/cookie per browser, not a
+  process-global active-user flag) - the prerequisite for genuinely
+  concurrent multi-user access from different devices at once.
+- **An opt-in, read-only combined view across profiles** (e.g. a household's
+  total net worth) without merging the underlying isolated databases -
+  aggregate at query time across each profile's file rather than changing
+  the storage model.
+- **Push-based Sheets sync** (Drive API change notifications) instead of
+  fixed-interval polling, to cut sync latency without hammering the API on a
+  tight interval.
+- **Real schema migration tooling** (e.g. Alembic) once `_add_missing_columns()`'s
+  "ADD COLUMN only" approach outgrows what it can safely express (renames,
+  drops, or backfills that need real data transformation, not just a new
+  nullable column).
+- **Scheduled local backups** of each profile's `.db` (e.g. a nightly
+  rotating copy into `data/backups/`), independent of whether Sheets sync
+  happens to be configured or healthy for that profile.
+- **An opt-in larger/cloud model for "Ask"** for people willing to trade the
+  zero-cost/fully-offline property for materially better question
+  understanding on complex asks, while keeping the local model as the
+  no-setup default.
+- **Frontend code-splitting** (route-based dynamic `import()`) now that the
+  bundle-size warning exists, mainly relevant if this is ever served to
+  anyone over a real network rather than localhost.
+- **A profile starter-kit/template** (clone another profile's category and
+  account setup into a new one) so a new profile doesn't have to rebuild a
+  taxonomy from the seeded defaults by hand.
