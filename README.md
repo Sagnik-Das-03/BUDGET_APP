@@ -69,7 +69,43 @@ short LLM call phrase that already-computed number into a sentence. Each
 question and its answer are saved as a `ChatMessage` under a `ChatThread` (the
 Ask page's tabs), so history survives a reload; a thread also includes its
 last few exchanges in the next question's prompt, so follow-ups like "what
-about last month?" resolve correctly.
+about last month?" resolve correctly. Every answer also ships the actual
+matching `Transaction` rows it computed from ("N matching transactions found"
+in the UI) and a heuristic confidence label, so you can check the real
+evidence instead of only trusting the sentence.
+
+### How the "self-learning" feedback loop works
+
+This is real feedback-driven behavior change, but it is **not** model
+fine-tuning - retraining even a small quantized local model on a personal
+machine isn't practical, and framing it as such would be misleading. What it
+actually is: a small, inspectable, growing memory of confirmed mistakes that
+gets fed back into future prompts.
+
+1. Every answer has a 👍/👎. A 👎 can include a short note (e.g. "should have
+   excluded transfers").
+2. That feedback is saved on the `ChatMessage` itself (`feedback`,
+   `feedback_note`), along with the exact structured query that was extracted
+   for it (`query_json`) - so a correction has something concrete to point at,
+   not just free text.
+3. Every 👎 also creates an `AskCorrection` row (the question, what was
+   extracted, and the note if one was given) - even a bare 👎 with no note,
+   since that's still a real signal that this question got a wrong answer.
+4. On the next few questions, the extraction prompt includes recent
+   corrections **that have a note** verbatim, under a "known past mistakes -
+   do not repeat these" heading - a note-less correction has nothing
+   actionable to say, so it's skipped here even though the row exists.
+5. The confidence heuristic shown under each answer checks (via word overlap,
+   no embeddings) whether the current question closely resembles ANY past
+   correction - noted or not - and marks it "low" if so: "we've been burned
+   on something like this before" is worth flagging even without knowing
+   exactly what went wrong.
+
+This is deliberately bounded and disposable, not a growing liability: corrections
+are plain rows in `ask_corrections`, only the most recent few are ever injected
+into a prompt (old ones age out of relevance on their own rather than needing
+active pruning), and deleting a chat thread or clearing corrections never
+touches your actual transaction data.
 
 ## Data model
 
@@ -140,6 +176,16 @@ erDiagram
         string question
         string answer
         float duration_sec "nullable"
+        string query_json "the extracted structured query, nullable"
+        string feedback "up / down / null"
+        string feedback_note "nullable, from a thumbs-down"
+        datetime created_at
+    }
+    ASK_CORRECTION {
+        int id PK
+        string question
+        string wrong_query_json "nullable"
+        string note "fed into future extraction prompts"
         datetime created_at
     }
 
@@ -163,6 +209,10 @@ through the API layer. `ChatThread`/`ChatMessage` back the Ask page's tabs and
 history - they're independent of `Transaction` (Ask computes its answers by
 querying `Transaction` fresh each time, not from anything stored on a message)
 and aren't read by `dashboard/calculations.py` or the Sheets sync at all.
+`AskCorrection` has no foreign key to the `ChatMessage` it came from - it's a
+standalone table of "lessons learned" that future questions' extraction
+prompts read from directly (see "How the self-learning feedback loop works"
+above), not a record tied to one specific past conversation.
 
 ## First-time setup
 
