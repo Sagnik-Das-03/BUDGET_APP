@@ -674,14 +674,38 @@ def ask(payload: AskIn, session: Session = Depends(get_session)):
     # fallback template is used verbatim if this call fails.
     answer = fallback_answer
     if llm_router.available:
-        period_totals = calc.totals(session, date_from, date_to)
+        # Only a "sum" question is actually about the period's money totals -
+        # count/avg/breakdown answers have nothing to do with income/expense/
+        # net or a category list, and including that context anyway (as this
+        # used to, unconditionally) gave the small model unrelated numbers to
+        # blend together - e.g. "how many transactions this year?" (aggregation
+        # = count, real answer 245) came back as a fabricated 215 once the
+        # prompt also threw in income/expense/net and a category breakdown it
+        # had no reason to reference. Keep each mode's prompt to only the
+        # numbers that question type actually needs.
+        context_line = ""
         if aggregation == "breakdown":
             lines = "\n".join(f"- {r['category']}: Rs {r['total']:,.0f}" for r in breakdown) or "- (none)"
             computed_line = f"Computed breakdown ({scope}{type_label}, {period_label}):\n{lines}\n"
+        elif aggregation == "count":
+            computed_line = (
+                f"Computed answer: {int(value)} transaction{'s' if int(value) != 1 else ''} "
+                f"{scope}{type_label}, {period_label}.\n"
+            )
+        elif aggregation == "avg":
+            computed_line = (
+                f"Computed answer: average = Rs {value:,.0f} per transaction, {scope}{type_label}, {period_label} "
+                f"(from {len(rows)} transaction{'s' if len(rows) != 1 else ''}).\n"
+            )
         else:
             computed_line = (
-                f"Computed answer: {aggregation} = Rs {value:,.0f}, {scope}{type_label}, {period_label} "
+                f"Computed answer: sum = Rs {value:,.0f}, {scope}{type_label}, {period_label} "
                 f"(from {len(rows)} transaction{'s' if len(rows) != 1 else ''}).\n"
+            )
+            period_totals = calc.totals(session, date_from, date_to)
+            context_line = (
+                f"Period totals for context - Income: Rs {period_totals['income']:,.0f}, "
+                f"Expenses: Rs {period_totals['expenses']:,.0f}, Net: Rs {period_totals['net']:,.0f}.\n"
             )
             # The extractor above resolves to only ONE aggregation, so a compound
             # question (e.g. "...and which category aside from rent") would have
@@ -694,21 +718,21 @@ def ask(payload: AskIn, session: Session = Depends(get_session)):
                 extra = extra[:6]
                 if extra:
                     extra_lines = "\n".join(f"- {r['category']}: Rs {r['total']:,.0f}" for r in extra)
-                    computed_line += f"\nTop expense categories this period (only ones you may name):\n{extra_lines}\n"
+                    context_line += f"\nTop expense categories this period (only ones you may name):\n{extra_lines}\n"
         last_exchange = prior_messages[-1] if prior_messages else None
         prompt = (
             (f'Previous exchange - Q: "{last_exchange.question}" A: "{last_exchange.answer}"\n' if last_exchange else "")
             + f'User question: "{question}"\n'
             + f"{computed_line}"
-            + f"Period totals for context - Income: Rs {period_totals['income']:,.0f}, "
-            f"Expenses: Rs {period_totals['expenses']:,.0f}, Net: Rs {period_totals['net']:,.0f}.\n\n"
-            "Answer the user's question directly in ONE-TWO natural, friendly sentences, using the computed "
-            "answer/breakdown above as the headline. If this is a follow-up to the previous exchange, phrase it "
-            "so the reply flows naturally from that (e.g. \"and last month it was...\") instead of repeating "
-            "yourself verbatim. You may reference the period totals for extra context only if the arithmetic is "
-            "simple and exact - if the question asks about something not covered by the numbers given, say you "
-            "don't have that instead of guessing. Never invent a number, category, or percentage that isn't "
-            "derivable from the ones given."
+            + f"{context_line}\n"
+            + "Answer the user's question directly in ONE-TWO natural, friendly sentences, using the computed "
+            "answer/breakdown above as the headline and nothing else - do not add income/expense/net totals or "
+            "a category breakdown unless they were actually given to you above. If this is a follow-up to the "
+            "previous exchange, phrase it so the reply flows naturally from that (e.g. \"and last month it "
+            "was...\") instead of repeating yourself verbatim. You may reference extra context given above only "
+            "if the arithmetic is simple and exact - if the question asks about something not covered by the "
+            "numbers given, say you don't have that instead of guessing. Never invent a number, category, or "
+            "percentage that isn't derivable from the ones given."
         )
         try:
             llm_answer = llm_router.complete(
