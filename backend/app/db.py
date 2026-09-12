@@ -20,6 +20,26 @@ def _db_path_for(db_file: str) -> Path:
     return path
 
 
+def db_file_size(db_file: str) -> int:
+    """Bytes on disk for a user's SQLite file - 0 if it hasn't been written
+    to yet (e.g. a brand new, still-empty database)."""
+    path = _db_path_for(db_file)
+    return path.stat().st_size if path.exists() else 0
+
+
+def delete_db_file(db_file: str) -> None:
+    """Permanently removes a user's SQLite file and its WAL/SHM sidecar
+    files, if any. Caller is responsible for making sure this isn't the
+    currently active database first - deleting a file a live engine still
+    holds open is asking for trouble on Windows (file locks) even where it
+    wouldn't outright fail."""
+    path = _db_path_for(db_file)
+    for suffix in ("", "-wal", "-shm", "-journal"):
+        candidate = path.with_name(path.name + suffix) if suffix else path
+        if candidate.exists():
+            candidate.unlink()
+
+
 def _initial_db_path() -> Path:
     """Which SQLite file this process opens at startup: the active user from
     the registry, bootstrapping the registry from the classic single-user
@@ -78,10 +98,16 @@ def switch_active_db(db_file: str) -> None:
     global engine, SessionLocal
     from app import models  # noqa: F401 - ensures models are registered on Base
 
+    old_engine = engine
     path = _db_path_for(db_file)
     engine = create_engine(f"sqlite:///{path}", connect_args={"check_same_thread": False})
     SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
     init_db()
+    # Dispose the PREVIOUS engine only after the new one is fully live - a
+    # lingering pooled connection on the old file is a real Windows problem
+    # (it blocks deleting that file later, e.g. an admin removing a user
+    # right after someone was last active on it), not just a resource nicety.
+    old_engine.dispose()
 
 
 def create_empty_db(db_file: str) -> None:
@@ -98,13 +124,22 @@ def create_empty_db(db_file: str) -> None:
         tmp_engine.dispose()
 
 
+@contextmanager
 def session_for(db_file: str):
     """A one-off Session bound to a specific user's file, independent of the
-    active engine - for seeding a newly created user's database without
-    switching into it. Caller is responsible for commit/close."""
+    active engine - for reading/seeding a user's database without switching
+    into it. The engine is disposed on exit so the file isn't left with a
+    lingering pooled connection - on Windows in particular, that connection
+    holding the file open blocks deleting it immediately afterward, which is
+    exactly what this is used for (admin: create/inspect/delete a user)."""
     path = _db_path_for(db_file)
     tmp_engine = create_engine(f"sqlite:///{path}", connect_args={"check_same_thread": False})
-    return sessionmaker(bind=tmp_engine, autoflush=False, expire_on_commit=False)()
+    session = sessionmaker(bind=tmp_engine, autoflush=False, expire_on_commit=False)()
+    try:
+        yield session
+    finally:
+        session.close()
+        tmp_engine.dispose()
 
 
 def get_session():

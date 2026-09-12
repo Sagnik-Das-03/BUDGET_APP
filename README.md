@@ -33,7 +33,8 @@ flowchart LR
         SYNC["sync engine + scheduler<br/>(app/sync)"]
     end
 
-    DB[("SQLite<br/>source of truth<br/>+ chat history")]
+    REG[("users_registry.json<br/>username → db file")]
+    DB[("SQLite<br/>ONE active user's file<br/>+ chat history")]
     SHEETS[("Google Sheets<br/>human-editable mirror")]
     MODELS[["Local models<br/>Qwen3 0.6B / 4B-int4<br/>via LiteRT-LM"]]
 
@@ -41,6 +42,8 @@ flowchart LR
     API --> CALC
     API -->|"1. extract query (JSON)<br/>2. Python computes exact answer<br/>3. phrase in words"| LLMR
     API <--> DB
+    API -.->|"switch active user<br/>(admin-gated)"| REG
+    REG -.->|resolves at startup / on switch| DB
     CALC --> DB
     LLMR --> MODELS
     SYNC <-->|two-way, ID-based| SHEETS
@@ -106,6 +109,57 @@ are plain rows in `ask_corrections`, only the most recent few are ever injected
 into a prompt (old ones age out of relevance on their own rather than needing
 active pruning), and deleting a chat thread or clearing corrections never
 touches your actual transaction data.
+
+## Multi-user & admin
+
+Each user is a **completely separate SQLite file**, not rows scoped by a
+`user_id` - the strongest possible isolation, at the cost of a user only ever
+being able to see their own data (by design; there's no cross-user anything).
+
+- **`app/user_registry.py`** is a small JSON file (`data/users_registry.json`)
+  mapping `username → db file` plus which one is currently active. It has to
+  be plain JSON, not a database table, because it's what decides *which*
+  database file this process even opens - it exists a layer below `app/db.py`.
+- **Switching users rebinds the process's live engine**, in place, via
+  `switch_active_db()`. Every repository and API route reaches the database
+  only through `get_session()`/`session_scope()`, which look up the current
+  `engine`/`SessionLocal` by name at call time rather than holding their own
+  reference captured at import time - so a switch takes effect immediately
+  everywhere (the sync scheduler, LLM chat, everything) with no other code
+  needing to know it happened. The *previous* engine is disposed only after
+  the new one is confirmed live, specifically because a lingering pooled
+  connection left on the old SQLite file blocks deleting that file on Windows.
+- **The original single-user database was migrated automatically**, not by
+  hand: the first time the registry doesn't exist yet, it's created pointing
+  at whatever `db_path` already resolved to (the classic `data/
+  budget_tracker.db`) under a default username - the file itself is never
+  moved, renamed, or rewritten by this migration.
+- **Creating a user never touches the active session.** `create_empty_db()`
+  and `session_for()` open a throwaway engine bound to the *new* file,
+  seed it (default categories/account, optionally `demo_data.py`'s synthetic
+  year of transactions), and dispose that engine when done - the
+  currently-active user's own connection is untouched throughout.
+- **Passwords are per-profile, salted PBKDF2-HMAC-SHA256** (`app/
+  user_registry.py`, stdlib `hashlib` only - no new dependency), stored as
+  `password_hash` on that user's registry entry. A profile with no password
+  set verifies as open on both activation and admin-gated actions - this is a
+  personal, single-machine app being retrofitted with passwords, not a fresh
+  multi-tenant system, so an existing profile must keep working exactly as it
+  did before its owner deliberately sets a password (Settings → Account).
+- **Creating or deleting a user is gated by the `admin` account's own
+  password**, independent of whichever profile happens to be active -
+  `_require_admin()` in `app/api/users.py` checks it directly, so you don't
+  have to switch into "admin" just to add a user. Also open (no check) until
+  an `admin` user exists and has actually set a password, for the same
+  backward-compatible reason as above.
+- **The Admin page** (`/admin`, linked in the nav only while signed in as
+  `admin`) lists every user with live disk usage and transaction count
+  (`GET /api/users/stats` - opens a throwaway session per user, same pattern
+  as creation), and lets you create or permanently delete a profile - deletion
+  asks for confirmation via a real dialog (shadcn `AlertDialog`, not
+  `window.confirm`), refuses to delete the currently active user or the last
+  remaining one, and removes the actual `.db` file on disk, not just the
+  registry entry.
 
 ## Data model
 
@@ -274,16 +328,20 @@ budget_tracker/
                                     (the human-readable monthly/weekly/yearly/Dashboard sheet tabs)
       dashboard/calculations.py    every number shown anywhere comes from here
       api/                         the REST/JSON API - the only thing the frontend talks to
-      auth.py                      optional HTTP Basic Auth (off unless configured)
+      auth.py                      optional HTTP Basic Auth (off unless configured) - global, not per-user
+      user_registry.py             username → db file mapping, password hashes; see "Multi-user & admin"
+      demo_data.py                  synthetic year of transactions for a "fill with demo data" user
       cli.py                       command-line interface
     scripts/seed_from_existing_xlsx.py   the one-time historical importer
     tests/                         pytest suite - fake Sheets adapter, in-memory SQLite
     docs/service_account_setup.md
-    data/budget_tracker.db
+    data/
+      budget_tracker.db, demo.db, admin.db, ...   one file per user
+      users_registry.json                          username → db file, active user, password hashes
   frontend/
     src/
-      pages/            Dashboard, Transactions, Conflicts, Settings, Logs
-      components/       NavBar, SyncStatus, chart cards, KPI tiles, etc.
+      pages/            Dashboard, Transactions, Import, Compare, Conflicts, Trash, Settings, Admin
+      components/       NavBar, TopRightDrawers (Ask/Logs), UserSwitcher, SyncStatus, chart cards, etc.
       lib/api.ts         typed fetch wrappers - one function per backend endpoint
     dist/                the built app FastAPI serves (generated, gitignored)
 ```
@@ -301,11 +359,16 @@ unless you first clear `backend/data/budget_tracker.db`.
 
 ## Everyday use
 
-- **Web UI**: Dashboard / Transactions / Conflicts / Settings / Logs, all in the
-  top nav. "Sync Now" is available from any page's top-right status widget.
-  The Dashboard's charts have a type switcher (bar/line/pie/donut/sunburst
-  where it makes sense), the KPI tiles are drag-to-reorder, and clicking a
-  category in the breakdown chart drills into its transactions.
+- **Web UI**: Dashboard / Transactions / Import / Compare / Conflicts / Trash /
+  Settings in the left nav (plus Admin, only while signed in as `admin`); Ask
+  and Sync Logs are drawers reachable from the top-right corner on every page
+  instead, not routed tabs - Ask in particular keeps running (and keeps its
+  chat state) if you switch left-nav tabs mid-question, since it's mounted
+  once outside the routed area, not per-page. The Dashboard's charts have a
+  type switcher (bar/line/pie/donut/sunburst where it makes sense), the KPI
+  tiles are drag-to-reorder, and clicking a category in the breakdown chart
+  drills into its transactions. The user switcher (bottom of the nav) is
+  where you swap profiles or create a new one.
 - **CLI** (needs `backend/.venv`, which only exists while `run.bat`'s window
   is open - run these from a *second* terminal):
   ```

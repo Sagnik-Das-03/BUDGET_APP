@@ -23,8 +23,21 @@ export function Settings() {
   const categories = useQuery({ queryKey: ['categories'], queryFn: api.listCategories });
   const accounts = useQuery({ queryKey: ['accounts'], queryFn: api.listAccounts });
   const palette = useQuery({ queryKey: ['chartPalette'], queryFn: api.getPalette });
+  const users = useQuery({ queryKey: ['users'], queryFn: () => api.listUsers() });
 
   const invalidate = (key: string) => queryClient.invalidateQueries({ queryKey: [key] });
+
+  const activeUser = users.data?.find((u) => u.is_active);
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newAccountPassword, setNewAccountPassword] = useState('');
+  const setPassword = useMutation({
+    mutationFn: () => api.setUserPassword(activeUser!.username, newAccountPassword, currentPassword || undefined),
+    onSuccess: () => {
+      invalidate('users');
+      setCurrentPassword('');
+      setNewAccountPassword('');
+    },
+  });
 
   const [goalInput, setGoalInput] = useState('');
   useEffect(() => {
@@ -144,6 +157,43 @@ export function Settings() {
   return (
     <div className="flex flex-col gap-8">
       <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Account{activeUser ? ` — ${activeUser.username}` : ''}</CardTitle>
+          <CardDescription>
+            {activeUser?.has_password
+              ? 'Change the password for this profile. You need the current one to set a new one.'
+              : 'This profile has no password yet - anyone with access to this computer can switch into it. Set one to require it on switch.'}
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-wrap items-end gap-2.5">
+          {activeUser?.has_password && (
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="current-password">Current password</Label>
+              <Input
+                id="current-password" type="password" className="w-48"
+                value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)}
+              />
+            </div>
+          )}
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="new-account-password">New password</Label>
+            <Input
+              id="new-account-password" type="password" className="w-48"
+              value={newAccountPassword} onChange={(e) => setNewAccountPassword(e.target.value)}
+            />
+          </div>
+          <Button
+            disabled={!activeUser || newAccountPassword.length < 4 || setPassword.isPending}
+            onClick={() => setPassword.mutate()}
+          >
+            {activeUser?.has_password ? 'Change password' : 'Set password'}
+          </Button>
+          {setPassword.isSuccess && <span className="text-sm text-green-600">Saved.</span>}
+          {setPassword.isError && <span className="text-sm text-destructive">{(setPassword.error as Error).message}</span>}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>

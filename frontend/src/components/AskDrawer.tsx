@@ -233,7 +233,7 @@ export function AskDrawer({ trigger }: { trigger: React.ReactNode }) {
   return (
     <Sheet>
       <SheetTrigger asChild>{trigger}</SheetTrigger>
-      <SheetContent side="right" className="relative flex flex-col" style={{ width, maxWidth: '95vw' }}>
+      <SheetContent side="right" className="flex flex-col" style={{ width, maxWidth: '95vw' }}>
         <ResizeHandle onMouseDown={onDragStart} />
         <SheetHeader>
           <SheetTitle className="flex items-center gap-2">

@@ -8,6 +8,7 @@ import { Compare } from './pages/Compare';
 import { Conflicts } from './pages/Conflicts';
 import { Trash } from './pages/Trash';
 import { Settings } from './pages/Settings';
+import { Admin } from './pages/Admin';
 
 export function App() {
   return (
@@ -28,6 +29,7 @@ export function App() {
               <Route path="/conflicts" element={<Conflicts />} />
               <Route path="/trash" element={<Trash />} />
               <Route path="/settings" element={<Settings />} />
+              <Route path="/admin" element={<Admin />} />
             </Routes>
           </div>
         </main>

@@ -4,7 +4,7 @@ import type {
   EssentialSplit, Highlights, ImportCommitResult, ImportPreviewResult, ImportRowIn, Insight, LlmStatus,
   MonthlyBreakdownRow, QuickAddResult, SavedView, SavingsGoalProgress, SavingsStreak, SpendConcentration,
   SpendingPattern, SyncConfig, SyncLogEntry, SyncStatus, Totals, Transaction, TrashedTransaction, TrendForRange,
-  ViewFilters,
+  UserStats, ViewFilters,
 } from './types';
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -171,10 +171,27 @@ export const api = {
 
   // ---------- users ----------
   listUsers: () => request<AppUser[]>('/api/users'),
-  createUser: (username: string, seedDemoData = false) =>
-    request<AppUser>('/api/users', { method: 'POST', body: JSON.stringify({ username, seed_demo_data: seedDemoData }) }),
-  activateUser: (username: string) =>
-    request<AppUser>(`/api/users/${encodeURIComponent(username)}/activate`, { method: 'POST' }),
+  getUserStats: () => request<UserStats>('/api/users/stats'),
+  createUser: (opts: { username: string; password: string; seedDemoData?: boolean; adminPassword?: string }) =>
+    request<AppUser>('/api/users', {
+      method: 'POST',
+      body: JSON.stringify({
+        username: opts.username, password: opts.password,
+        seed_demo_data: opts.seedDemoData ?? false, admin_password: opts.adminPassword || null,
+      }),
+    }),
+  activateUser: (username: string, password?: string) =>
+    request<AppUser>(`/api/users/${encodeURIComponent(username)}/activate`, {
+      method: 'POST', body: JSON.stringify({ password: password || null }),
+    }),
+  deleteUser: (username: string, adminPassword?: string) =>
+    request<{ deleted: boolean }>(`/api/users/${encodeURIComponent(username)}`, {
+      method: 'DELETE', body: JSON.stringify({ admin_password: adminPassword || null }),
+    }),
+  setUserPassword: (username: string, newPassword: string, oldPassword?: string) =>
+    request<{ updated: boolean }>(`/api/users/${encodeURIComponent(username)}/set_password`, {
+      method: 'POST', body: JSON.stringify({ new_password: newPassword, old_password: oldPassword || null }),
+    }),
 
   // ---------- appearance ----------
   getPalette: () => request<ChartPalette>('/api/appearance/palette'),

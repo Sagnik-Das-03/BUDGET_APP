@@ -1,6 +1,21 @@
 export interface AppUser {
   username: string;
   is_active: boolean;
+  db_size_bytes: number;
+  has_password: boolean;
+}
+
+export interface UserStat {
+  username: string;
+  is_active: boolean;
+  db_size_bytes: number;
+  transaction_count: number;
+}
+
+export interface UserStats {
+  total_users: number;
+  total_size_bytes: number;
+  users: UserStat[];
 }
 
 export interface Category {
