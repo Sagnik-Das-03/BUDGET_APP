@@ -439,6 +439,26 @@ def compare_recap(payload: CompareRecapIn, session: Session = Depends(get_sessio
     return CompareRecapOut(recap=recap_text or "Not enough data to compare these periods.")
 
 
+@router.get("/model_status/{task}")
+def model_status(task: str):
+    if task not in TASK_MODEL:
+        raise HTTPException(404, f"Unknown task: {task}")
+    return {"task": task, "available": llm_router.available, "loaded": llm_router.is_loaded(task)}
+
+
+@router.post("/warmup/{task}")
+def warmup(task: str):
+    if task not in TASK_MODEL:
+        raise HTTPException(404, f"Unknown task: {task}")
+    if not llm_router.available:
+        raise HTTPException(503, llm_router.unavailable_reason or "AI features aren't available right now.")
+    try:
+        llm_router.warm_up_task(task)
+    except Exception as e:
+        raise HTTPException(503, f"Failed to load model: {e}") from e
+    return {"task": task, "loaded": True}
+
+
 @router.get("/chat/threads", response_model=list[ChatThreadOut])
 def list_chat_threads(session: Session = Depends(get_session)):
     return ChatRepository(session).list_threads()

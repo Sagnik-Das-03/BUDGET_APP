@@ -141,6 +141,10 @@ export const api = {
     label_a: string; label_b: string; date_from_a: string; date_to_a: string;
     date_from_b: string; date_to_b: string;
   }) => request<{ recap: string }>('/api/llm/compare_recap', { method: 'POST', body: JSON.stringify(payload) }),
+  llmModelStatus: (task: string) =>
+    request<{ task: string; available: boolean; loaded: boolean }>(`/api/llm/model_status/${task}`),
+  warmupModel: (task: string) =>
+    request<{ task: string; loaded: boolean }>(`/api/llm/warmup/${task}`, { method: 'POST' }),
   ask: (question: string, threadId?: number | null) =>
     request<AskResponse>('/api/llm/ask', {
       method: 'POST', body: JSON.stringify({ question, thread_id: threadId ?? null }),

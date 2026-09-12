@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
-import { Plus, Send, X } from 'lucide-react';
+import { Loader2, Plus, Send, X } from 'lucide-react';
 import { api } from '../lib/api';
 import type { ChatMessage } from '../lib/types';
 import { useElapsedSeconds } from '../lib/useElapsedSeconds';
@@ -27,6 +27,27 @@ function toExchange(m: ChatMessage): Exchange {
 export function Ask() {
   const queryClient = useQueryClient();
   const threads = useQuery({ queryKey: ['chatThreads'], queryFn: () => api.chatThreads() });
+
+  // query_parse and summarize (the two tasks Ask uses) share the same
+  // underlying model, so loading either one loads what Ask needs. Triggered
+  // as soon as this page opens - rather than waiting for the first question -
+  // so the "please wait" state is up front and explicit instead of the first
+  // real answer silently taking up to a minute.
+  const modelStatus = useQuery({ queryKey: ['llmModelStatus', 'query_parse'], queryFn: () => api.llmModelStatus('query_parse') });
+  const warmup = useMutation({
+    mutationFn: () => api.warmupModel('query_parse'),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['llmModelStatus', 'query_parse'] }),
+  });
+  const warmupTriggered = useRef(false);
+  useEffect(() => {
+    if (modelStatus.data?.available && !modelStatus.data.loaded && !warmupTriggered.current) {
+      warmupTriggered.current = true;
+      warmup.mutate();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modelStatus.data]);
+  const modelLoading = warmup.isPending || (!!modelStatus.data?.available && !modelStatus.data.loaded && !warmup.isError);
+  const modelLoadElapsed = useElapsedSeconds(warmup.isPending);
 
   // null = an unsaved "new chat" draft - no thread exists in the DB until the
   // first question is actually sent, so clicking "+" repeatedly doesn't litter
@@ -92,7 +113,7 @@ export function Ask() {
 
   function submit(q: string) {
     const trimmed = q.trim();
-    if (!trimmed || ask.isPending) return;
+    if (!trimmed || ask.isPending || modelLoading) return;
     startRef.current = Date.now();
     ask.mutate(trimmed);
     setQuestion('');
@@ -149,7 +170,20 @@ export function Ask() {
         </button>
       </div>
 
-      {history.length === 0 && !ask.isPending && (
+      {modelLoading && (
+        <div className="mb-4 flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-2.5 text-sm text-muted-foreground">
+          <Loader2 className="size-4 animate-spin" />
+          Please wait, loading the local AI model{modelLoadElapsed ? ` (${modelLoadElapsed}s)` : ''} — this only
+          happens once per server restart, then answers come back fast.
+        </div>
+      )}
+      {warmup.isError && (
+        <div className="mb-4 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2.5 text-sm text-destructive">
+          Couldn't load the AI model: {(warmup.error as Error).message}
+        </div>
+      )}
+
+      {history.length === 0 && !ask.isPending && !modelLoading && (
         <div className="mb-4 flex flex-wrap gap-2">
           {EXAMPLES.map((ex) => (
             <button
@@ -180,19 +214,20 @@ export function Ask() {
         ))}
         {ask.isPending && (
           <div className="self-start rounded-lg bg-muted px-3.5 py-2 text-sm text-muted-foreground">
-            Thinking… {elapsed}s elapsed — this can take up to a minute the first time, while the local model loads.
+            Thinking… {elapsed}s elapsed.
           </div>
         )}
       </div>
 
       <div className="flex gap-2">
         <Input
-          placeholder="e.g. how much did I spend on food last month?"
+          placeholder={modelLoading ? 'Waiting for the AI model to finish loading…' : 'e.g. how much did I spend on food last month?'}
           value={question}
           onChange={(e) => setQuestion(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') submit(question); }}
+          disabled={modelLoading}
         />
-        <Button onClick={() => submit(question)} disabled={ask.isPending || !question.trim()}>
+        <Button onClick={() => submit(question)} disabled={ask.isPending || modelLoading || !question.trim()}>
           <Send className="size-4" /> Ask
         </Button>
       </div>

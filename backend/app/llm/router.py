@@ -68,6 +68,25 @@ class LLMRouter:
             except Exception:
                 logger.exception("Failed to load model %r for task %r", model_key, task)
 
+    def is_loaded(self, task: str) -> bool:
+        """Whether the model backing `task` has already been loaded into
+        memory - lets a caller (e.g. the Ask page) show a "loading model"
+        state up front instead of the first real question silently taking
+        up to a minute."""
+        model_key = TASK_MODEL.get(task)
+        return bool(model_key) and model_key in self._engines
+
+    def warm_up_task(self, task: str) -> None:
+        """Eagerly load the model for one task on demand, outside the fixed
+        EAGER_TASKS set - e.g. triggered from the frontend the moment a user
+        opens a chat-style page, rather than waiting for their first message."""
+        if not self.available:
+            raise RuntimeError(f"LLM features unavailable: {self.unavailable_reason}")
+        model_key = TASK_MODEL.get(task)
+        if not model_key:
+            raise ValueError(f"No model configured for task {task!r}")
+        self._engine_for_model(model_key)
+
     def _raw_complete(
         self, task: str, prompt: str, *, system_message: Optional[str], max_output_tokens: int,
         enable_thinking: bool, response_format=None,
