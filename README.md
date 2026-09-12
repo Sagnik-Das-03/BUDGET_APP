@@ -129,12 +129,26 @@ erDiagram
         enum level
         string message
     }
+    CHAT_THREAD {
+        int id PK
+        string title "auto-set from the first question in it"
+        datetime updated_at
+    }
+    CHAT_MESSAGE {
+        int id PK
+        int thread_id FK
+        string question
+        string answer
+        float duration_sec "nullable"
+        datetime created_at
+    }
 
     CATEGORY ||--o{ TRANSACTION : categorizes
     ACCOUNT  ||--o{ TRANSACTION : holds
     CATEGORY ||--o{ BUDGET : "has a goal in"
     TRANSACTION }o..o{ MONTHLY_PERIOD : "period_key match (not a real FK)"
     SAVINGS_GOAL }o..o{ MONTHLY_PERIOD : "period_key match (not a real FK)"
+    CHAT_THREAD ||--o{ CHAT_MESSAGE : contains
 ```
 
 `Transaction` is the only table most features touch - `category_id`/`account_id`
@@ -145,7 +159,10 @@ each period, not to constrain anything. `SyncMeta`/`SyncLog` track the sync
 engine's own state and aren't referenced by anything else. `dashboard/
 calculations.py` (the single source of truth for every number shown anywhere)
 reads `Transaction` joined to `Category`/`Account` directly - it never goes
-through the API layer.
+through the API layer. `ChatThread`/`ChatMessage` back the Ask page's tabs and
+history - they're independent of `Transaction` (Ask computes its answers by
+querying `Transaction` fresh each time, not from anything stored on a message)
+and aren't read by `dashboard/calculations.py` or the Sheets sync at all.
 
 ## First-time setup
 

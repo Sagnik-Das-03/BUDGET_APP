@@ -41,6 +41,21 @@ _RANGE_LABELS = {
 }
 
 
+def _answer_is_faithful(text: str, aggregation: str, value: float, breakdown: list[dict]) -> bool:
+    """Whether a phrased answer actually contains the real computed figure(s)
+    verbatim, rather than a paraphrase that quietly changed the number - the
+    only defense against a small model altering a value while "just" phrasing
+    it (a real observed failure: 692,075 rendered back as 672,312)."""
+    if aggregation == "breakdown":
+        if not breakdown:
+            return True
+        top = breakdown[0]
+        return top["category"] in text and f"{top['total']:,.0f}" in text
+    if aggregation == "count":
+        return str(int(value)) in text
+    return f"{value:,.0f}" in text
+
+
 def _resolve_named_range(range_key: str, date_from: Optional[date_type] = None,
                           date_to: Optional[date_type] = None) -> tuple[Optional[date_type], Optional[date_type]]:
     """this_week/this_month/this_year/all_time/custom go through the dashboard's
@@ -719,20 +734,29 @@ def ask(payload: AskIn, session: Session = Depends(get_session)):
                 if extra:
                     extra_lines = "\n".join(f"- {r['category']}: Rs {r['total']:,.0f}" for r in extra)
                     context_line += f"\nTop expense categories this period (only ones you may name):\n{extra_lines}\n"
-        last_exchange = prior_messages[-1] if prior_messages else None
+        # No conversation history here, on purpose: an earlier version included
+        # the previous Q&A and told the model to "phrase it so the reply flows
+        # naturally (e.g. 'and last month it was...')" - a real question asked
+        # only about this year came back with a fabricated, unrequested "last
+        # month" comparison, because the model took the example literally. The
+        # previous exchange also isn't guaranteed to have been correct itself
+        # (this whole feature exists because it sometimes isn't), so echoing it
+        # back risks compounding an old wrong number into a new answer. History
+        # is only used for the EARLIER extraction step (deciding what the new
+        # question is asking, where it's grammar-constrained and can't corrupt
+        # a figure) - phrasing gets nothing to paraphrase beyond the number(s)
+        # actually computed for this question, and nothing else to imitate.
         prompt = (
-            (f'Previous exchange - Q: "{last_exchange.question}" A: "{last_exchange.answer}"\n' if last_exchange else "")
-            + f'User question: "{question}"\n'
-            + f"{computed_line}"
-            + f"{context_line}\n"
-            + "Answer the user's question directly in ONE-TWO natural, friendly sentences, using the computed "
-            "answer/breakdown above as the headline and nothing else - do not add income/expense/net totals or "
-            "a category breakdown unless they were actually given to you above. If this is a follow-up to the "
-            "previous exchange, phrase it so the reply flows naturally from that (e.g. \"and last month it "
-            "was...\") instead of repeating yourself verbatim. You may reference extra context given above only "
-            "if the arithmetic is simple and exact - if the question asks about something not covered by the "
-            "numbers given, say you don't have that instead of guessing. Never invent a number, category, or "
-            "percentage that isn't derivable from the ones given."
+            f'User question: "{question}"\n'
+            f"{computed_line}"
+            f"{context_line}\n"
+            "Answer the user's question directly in ONE-TWO natural, friendly sentences, using the computed "
+            "answer/breakdown above as the headline and nothing else - do not add income/expense/net totals, a "
+            "category breakdown, or a comparison to any other period unless they were actually given to you "
+            "above. You may reference extra context given above only if the arithmetic is simple and exact - if "
+            "the question asks about something not covered by the numbers given, say you don't have that "
+            "instead of guessing. Never invent a number, category, or percentage that isn't derivable from the "
+            "ones given."
         )
         try:
             llm_answer = llm_router.complete(
@@ -740,7 +764,12 @@ def ask(payload: AskIn, session: Session = Depends(get_session)):
                 system_message="You are a precise personal-finance assistant. Never invent figures - only use the ones given.",
                 max_output_tokens=130,
             ).strip()
-            if llm_answer:
+            # The model has, in practice, altered the actual computed figure
+            # while phrasing it (692,075 rendered back as 672,312) - so the
+            # phrased answer is only trusted if it demonstrably contains the
+            # real number(s) verbatim; otherwise the exact deterministic
+            # fallback_answer (already set above) is used instead.
+            if llm_answer and _answer_is_faithful(llm_answer, aggregation, value, breakdown):
                 answer = llm_answer
         except Exception:
             pass  # fallback_answer already set
