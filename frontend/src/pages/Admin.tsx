@@ -64,6 +64,10 @@ export function Admin() {
     mutationFn: () => api.setUserPassword(admin!.username, nextAdminPw, currentAdminPw || undefined),
     onSuccess: () => {
       invalidateUserQueries();
+      // The freshly-set password immediately becomes correct for the
+      // "authorize" field below too, so changing/setting it here doesn't
+      // force retyping it a second time to create or delete a user next.
+      setAdminPassword(nextAdminPw);
       setCurrentAdminPw('');
       setNextAdminPw('');
     },
@@ -84,18 +88,22 @@ export function Admin() {
       <h1 className="text-2xl font-bold tracking-tight">Admin</h1>
       <p className="mb-5 mt-1 text-sm text-muted-foreground">
         Manage user profiles - each one is a fully separate database, with its own (optional)
-        Google Sheet. Creating or deleting a user is gated by the admin account's own password,
-        entered once below; until one is set, these actions stay open.
+        Google Sheet.
       </p>
 
-      <div className="mb-5 max-w-xs">
+      <Card className="mb-6 max-w-xs p-4">
+        <Label htmlFor="admin-authorize-pw" className="text-sm font-semibold">Authorize</Label>
+        <p className="mb-3 mt-1 text-xs text-muted-foreground">
+          Required below to create or delete a user, if a password is set (see "Admin password").
+        </p>
         <Input
+          id="admin-authorize-pw"
           type="password"
-          placeholder="Admin password (only if one is set)"
+          placeholder="Admin password"
           value={adminPassword}
           onChange={(e) => setAdminPassword(e.target.value)}
         />
-      </div>
+      </Card>
 
       {stats.data && (
         <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4 sm:max-w-2xl">

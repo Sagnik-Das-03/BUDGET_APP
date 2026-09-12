@@ -14,7 +14,16 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     const body = await res.text();
-    throw new Error(`${res.status}: ${body}`);
+    // FastAPI's error body is {"detail": "..."} - surface that clean
+    // sentence instead of the raw "403: {...}" blob whenever it parses.
+    let message = body;
+    try {
+      const parsed = JSON.parse(body);
+      if (parsed && typeof parsed.detail === 'string') message = parsed.detail;
+    } catch {
+      // not JSON - fall back to the raw body text as-is
+    }
+    throw new Error(message);
   }
   const ct = res.headers.get('content-type') || '';
   return ct.includes('application/json') ? res.json() : (undefined as T);

@@ -67,7 +67,9 @@ def _require_admin(admin_password: Optional[str]) -> None:
     rather than locking out a setup that never configured it."""
     if not registry.exists(ADMIN_USERNAME) or not registry.has_password(ADMIN_USERNAME):
         return
-    if not admin_password or not registry.verify_password(ADMIN_USERNAME, admin_password):
+    if not admin_password:
+        raise HTTPException(403, "Admin password required")
+    if not registry.verify_password(ADMIN_USERNAME, admin_password):
         raise HTTPException(403, "Incorrect admin password")
 
 
