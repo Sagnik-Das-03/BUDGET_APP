@@ -59,6 +59,8 @@ export interface AskResponse {
   duration_sec: number | null;
   rows: AskRow[];
   message_id: number | null;
+  confidence: 'high' | 'medium' | 'low';
+  confidence_reasons: string[];
 }
 
 export interface ChatThread {

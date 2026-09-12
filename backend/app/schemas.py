@@ -170,11 +170,17 @@ class AskOut(BaseModel):
     range: str
     thread_id: Optional[int] = None
     duration_sec: Optional[float] = None
-    # The actual matching rows behind the answer (capped) - lets you see
+    # The actual matching rows behind the answer, IN FULL - lets you see
     # exactly what was found and catch a bad extraction yourself, e.g. the
     # wrong category or date range, instead of only trusting the phrased text.
     rows: list[AskRowOut] = []
     message_id: Optional[int] = None
+    # A deterministic heuristic ("high"/"medium"/"low"), never a model-
+    # reported self-assessment - see the "confidence_reasons" comment in
+    # ask() for why. confidence_reasons lists the concrete, human-readable
+    # facts that justify anything less than "high".
+    confidence: str = "high"
+    confidence_reasons: list[str] = []
 
 
 class ChatThreadOut(BaseModel):

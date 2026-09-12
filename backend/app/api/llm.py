@@ -632,11 +632,28 @@ def ask(payload: AskIn, session: Session = Depends(get_session)):
     ttype = parsed.get("transaction_type")
     ttype = ttype if ttype in ("Income", "Expense") else None
     valid_range_types = {"this_week", "this_month", "last_month", "last_n_days", "last_n_months", "this_year", "all_time"}
+    # Whether the model's raw output actually landed on something we recognize,
+    # tracked BEFORE defaulting - a silent fallback to "this_month" is a real
+    # sign the extraction didn't understand the question, not a neutral choice.
+    range_defaulted = parsed.get("range_type") not in valid_range_types
     range_type = parsed.get("range_type") if parsed.get("range_type") in valid_range_types else "this_month"
     range_n = parsed.get("range_n")
     range_n = range_n if isinstance(range_n, int) and 1 <= range_n <= 365 else 1
+    aggregation_defaulted = parsed.get("aggregation") not in ("sum", "count", "avg", "breakdown")
     aggregation = parsed.get("aggregation") if parsed.get("aggregation") in ("sum", "count", "avg", "breakdown") else "sum"
     keyword = (parsed.get("keyword") or "").strip()[:80]
+
+    # A crude but honest similarity check (word overlap, no embeddings) against
+    # recent corrections - if this question closely resembles one that was
+    # marked wrong before, that is real signal even though the confidence
+    # score below is otherwise a heuristic, not a model-reported number (small
+    # local models cannot reliably self-assess confidence, so one is never
+    # asked to).
+    def _word_overlap(a: str, b: str) -> float:
+        wa, wb = set(a.lower().split()), set(b.lower().split())
+        return (len(wa & wb) / len(wa | wb)) if (wa and wb) else 0.0
+
+    similar_correction = next((c for c in corrections if _word_overlap(question, c.question) > 0.5), None)
 
     today = date_type.today()
     if range_type == "last_n_days":
@@ -836,6 +853,23 @@ def ask(payload: AskIn, session: Session = Depends(get_session)):
         for r in rows
     ]
 
+    # A deterministic, inspectable heuristic - NOT a model-reported score (a
+    # small local model asked "how confident are you" produces a plausible-
+    # looking number with no real calibration behind it, which would be worse
+    # than showing nothing). Each reason below is a concrete fact about this
+    # specific answer, not a vibe.
+    confidence_reasons = []
+    nothing_found = (not breakdown) if aggregation == "breakdown" else (not rows)
+    if nothing_found:
+        confidence_reasons.append("No matching transactions were found for this query")
+    if range_defaulted:
+        confidence_reasons.append('Could not identify a specific time period, defaulted to "this month"')
+    if aggregation_defaulted:
+        confidence_reasons.append('Could not identify how to aggregate, defaulted to "sum"')
+    if similar_correction:
+        confidence_reasons.append(f'A similar question was corrected before: "{similar_correction.note}"')
+    confidence = "low" if (nothing_found or similar_correction) else ("medium" if confidence_reasons else "high")
+
     if aggregation == "breakdown":
         return AskOut(
             answer=answer,
@@ -845,12 +879,14 @@ def ask(payload: AskIn, session: Session = Depends(get_session)):
             transaction_type=ttype, range=range_key,
             thread_id=thread.id, duration_sec=duration_sec,
             rows=row_outs, message_id=message.id,
+            confidence=confidence, confidence_reasons=confidence_reasons,
         )
 
     return AskOut(
         answer=answer,
         amount=round(value, 2) if aggregation != "count" else None,
         count=int(value) if aggregation == "count" else len(rows),
+        confidence=confidence, confidence_reasons=confidence_reasons,
         category=categories_in[0] if len(categories_in) == 1 else None,
         transaction_type=ttype, range=range_key,
         thread_id=thread.id, duration_sec=duration_sec,

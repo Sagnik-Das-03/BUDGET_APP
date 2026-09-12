@@ -1,12 +1,12 @@
 import { Route, BrowserRouter, Routes } from 'react-router-dom';
 import { NavBar } from './components/NavBar';
+import { TopRightDrawers } from './components/TopRightDrawers';
 import { Dashboard } from './pages/Dashboard';
 import { Transactions } from './pages/Transactions';
 import { Import } from './pages/Import';
 import { Compare } from './pages/Compare';
 import { Conflicts } from './pages/Conflicts';
 import { Trash } from './pages/Trash';
-import { Ask } from './pages/Ask';
 import { Settings } from './pages/Settings';
 
 export function App() {
@@ -14,6 +14,10 @@ export function App() {
     <BrowserRouter>
       <div className="flex min-h-screen bg-background">
         <NavBar />
+        {/* Rendered once, outside <Routes> - Ask's in-flight question and chat
+            state must survive navigating between the left-nav tabs below, not
+            just clicking around within one page. */}
+        <TopRightDrawers />
         <main className="min-w-0 flex-1 px-6 py-8">
           <div className="mx-auto max-w-6xl">
             <Routes>
@@ -23,7 +27,6 @@ export function App() {
               <Route path="/compare" element={<Compare />} />
               <Route path="/conflicts" element={<Conflicts />} />
               <Route path="/trash" element={<Trash />} />
-              <Route path="/ask" element={<Ask />} />
               <Route path="/settings" element={<Settings />} />
             </Routes>
           </div>

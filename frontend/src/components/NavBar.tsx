@@ -1,12 +1,11 @@
 import { NavLink } from 'react-router-dom';
 import {
-  AlertTriangle, ArrowLeftRight, GitCompare, LayoutDashboard, ScrollText,
-  Settings, Sparkles, Trash2, Upload, Wallet,
+  AlertTriangle, ArrowLeftRight, GitCompare, LayoutDashboard,
+  Settings, Trash2, Upload, Wallet,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { SyncStatusWidget } from './SyncStatus';
 import { ModeToggle } from './ModeToggle';
-import { LogsDrawer } from './LogsDrawer';
 
 const LINKS = [
   { to: '/', label: 'Dashboard', end: true, icon: LayoutDashboard },
@@ -15,10 +14,11 @@ const LINKS = [
   { to: '/compare', label: 'Compare', icon: GitCompare },
   { to: '/conflicts', label: 'Conflicts', icon: AlertTriangle },
   { to: '/trash', label: 'Trash', icon: Trash2 },
-  { to: '/ask', label: 'Ask', icon: Sparkles },
   { to: '/settings', label: 'Settings', icon: Settings },
 ];
 
+// Ask and Logs live in TopRightDrawers (rendered from App.tsx) instead of
+// here - they're drawers reachable from every page, not routed tabs.
 export function NavBar() {
   return (
     <aside className="sticky top-0 flex h-screen w-60 shrink-0 flex-col border-r bg-card/80 backdrop-blur supports-backdrop-filter:bg-card/60">
@@ -45,17 +45,6 @@ export function NavBar() {
             {l.label}
           </NavLink>
         ))}
-        <LogsDrawer
-          trigger={
-            <button
-              type="button"
-              className="flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm font-medium text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
-            >
-              <ScrollText className="size-4 shrink-0" />
-              Logs
-            </button>
-          }
-        />
       </nav>
       <div className="flex flex-col gap-2.5 border-t px-3 py-3">
         <SyncStatusWidget />
