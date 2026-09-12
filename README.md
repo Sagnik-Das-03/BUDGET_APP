@@ -74,11 +74,11 @@ flowchart LR
     API -->|"1. extract query (JSON)<br/>2. Python computes exact answer<br/>3. phrase in words"| LLMR
     API <--> DB
     API -.->|"create/delete user (admin-gated)<br/>switch active user"| REG
-    REG -.->|resolves at startup / on switch<br/>old engine disposed after new is live| DB
+    REG -.->|"resolves at startup / on switch<br/>old engine disposed after new is live"| DB
     CALC --> DB
     LLMR --> MODELS
-    SYNC -.->|reload_for_active_user() on switch| DB
-    SYNC -.->|falls back to shared .env key<br/>if this user has none| CREDS
+    SYNC -.->|"reload_for_active_user on switch"| DB
+    SYNC -.->|"falls back to shared .env key<br/>if this user has none"| CREDS
     SYNC <-->|two-way, ID-based| SHEETS
     SYNC <--> DB
 ```
