@@ -52,6 +52,12 @@ class FakeGoogleSheetsService:
             return self.sheets[title]
         return self.create_sheet(spreadsheet_id, title)
 
+    def reorder_sheets(self, spreadsheet_id: str, sheet_ids_in_order: list[int]) -> None:
+        by_id = {sid: title for title, sid in self.sheets.items()}
+        # dict insertion order doubles as "tab order" for get_sheets() below,
+        # same as the real API returning sheets in their tab-bar position.
+        self.sheets = {by_id[sid]: sid for sid in sheet_ids_in_order if sid in by_id}
+
     # ---------- values ----------
 
     def get_rows(self, spreadsheet_id: str, sheet_name: str) -> list[list]:

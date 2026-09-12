@@ -57,6 +57,21 @@ export function Settings() {
     return parts.join(', ') + '.';
   })();
 
+  const setTabOrderDirection = useMutation({
+    mutationFn: (descending: boolean) => api.setTabOrderDirection(descending),
+    onSuccess: () => invalidate('syncConfig'),
+  });
+
+  const reorderTabs = useMutation({ mutationFn: () => api.reorderTabsNow() });
+  const reorderTabsMessage = (() => {
+    const r = reorderTabs.data;
+    if (!r) return null;
+    if ('error' in r) return r.error;
+    return r.reordered
+      ? `Re-ordered dated tabs (${config.data?.period_tab_sort_descending === false ? 'oldest' : 'newest'} first).`
+      : 'Tabs are already in order.';
+  })();
+
   const saveSavingsGoal = useMutation({
     mutationFn: (amount: number) => api.setSavingsGoal(amount),
     onSuccess: () => invalidate('savingsGoal'),
@@ -175,6 +190,27 @@ export function Settings() {
             direction above. This already happens automatically on every sync — use the button to see it right away.
           </span>
           {compactMessage && <span className="w-full text-xs text-muted-foreground">{compactMessage}</span>}
+        </CardContent>
+        <CardContent className="flex flex-wrap items-center gap-2.5 border-t pt-4">
+          <Label className="text-sm">Order dated tabs</Label>
+          <ToggleGroup
+            type="single"
+            variant="outline"
+            size="sm"
+            value={config.data?.period_tab_sort_descending === false ? 'asc' : 'desc'}
+            onValueChange={(v) => v && setTabOrderDirection.mutate(v === 'desc')}
+          >
+            <ToggleGroupItem value="desc" className="px-2.5 text-xs">Newest First</ToggleGroupItem>
+            <ToggleGroupItem value="asc" className="px-2.5 text-xs">Oldest First</ToggleGroupItem>
+          </ToggleGroup>
+          <Button size="sm" variant="outline" disabled={reorderTabs.isPending} onClick={() => reorderTabs.mutate()}>
+            {reorderTabs.isPending ? 'Reordering…' : 'Reorder Tabs Now'}
+          </Button>
+          <span className="w-full text-xs text-muted-foreground">
+            Keeps the monthly tabs (2026-04, 2026-05, ...) in this order left to right in the spreadsheet's tab bar -
+            a new month is otherwise just appended wherever the tab bar happens to end. Runs on every sync too.
+          </span>
+          {reorderTabsMessage && <span className="w-full text-xs text-muted-foreground">{reorderTabsMessage}</span>}
         </CardContent>
       </Card>
 

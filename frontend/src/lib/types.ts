@@ -302,4 +302,5 @@ export interface SyncConfig {
   sync_interval_default: number;
   sync_interval_min: number;
   sheet_sort_descending: boolean;
+  period_tab_sort_descending: boolean;
 }

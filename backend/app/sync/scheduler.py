@@ -10,10 +10,13 @@ from googleapiclient.errors import HttpError
 
 from app.config import settings
 from app.db import session_scope
-from app.repositories.app_settings import SHEET_SORT_DIRECTION_KEY, SYNC_INTERVAL_KEY, AppSettingRepository
+from app.repositories.app_settings import (
+    PERIOD_TAB_SORT_DIRECTION_KEY, SHEET_SORT_DIRECTION_KEY, SYNC_INTERVAL_KEY, AppSettingRepository,
+)
 from app.repositories.categories import CategoryRepository
 from app.repositories.accounts import AccountRepository
 from app.sheets.adapter import GoogleSheetsService
+from app.sync import periods as periods_mod
 from app.sync.engine import compact_and_sort, run_sync_cycle
 from typing import Optional
 
@@ -48,6 +51,7 @@ _scheduler: Optional[BackgroundScheduler] = None
 _active_spreadsheet_id: Optional[str] = None  # resolved lazily: settings value, or one this process created
 _current_interval: int = settings.sync_interval_seconds  # overridden from DB (if set) in start()
 _current_sort_descending: bool = True  # overridden from DB (if set) in start()
+_current_tab_sort_descending: bool = True  # overridden from DB (if set) in start()
 
 
 def get_status() -> dict:
@@ -120,7 +124,10 @@ def run_once() -> dict:
         with session_scope() as session:
             CategoryRepository(session).ensure_defaults()
             AccountRepository(session).ensure_default()
-            summary = run_sync_cycle(session, sheets, spreadsheet_id, sort_descending=_current_sort_descending)
+            summary = run_sync_cycle(
+                session, sheets, spreadsheet_id,
+                sort_descending=_current_sort_descending, tab_sort_descending=_current_tab_sort_descending,
+            )
         ok = not summary.get("errors")
         _set_status(
             state="idle" if ok else "error",
@@ -153,6 +160,26 @@ def run_compact_and_sort_once() -> dict:
         return compact_and_sort(sheets, spreadsheet_id, descending=_current_sort_descending)
     except Exception as e:
         logger.exception("manual sheet compaction crashed")
+        return {"error": str(e)}
+    finally:
+        _sync_lock.release()
+
+
+def run_reorder_tabs_once() -> dict:
+    """Runs just the period-tab reordering pass on demand - for the
+    "Reorder Tabs Now" button in Settings. Shares _sync_lock with
+    run_once() so it can't run concurrently with (or be raced by) a real
+    pull/push cycle."""
+    if not settings.credentials_configured:
+        return {"error": "Google credentials not configured yet - see docs/service_account_setup.md"}
+    if not _sync_lock.acquire(blocking=False):
+        return {"error": "sync already in progress"}
+    try:
+        sheets = _sheets_client()
+        spreadsheet_id = _resolve_spreadsheet_id(sheets)
+        return periods_mod.reorder_period_tabs(sheets, spreadsheet_id, descending=_current_tab_sort_descending)
+    except Exception as e:
+        logger.exception("manual tab reorder crashed")
         return {"error": str(e)}
     finally:
         _sync_lock.release()
@@ -193,8 +220,24 @@ def set_sort_descending(descending: bool) -> bool:
     return descending
 
 
+def get_tab_sort_descending() -> bool:
+    return _current_tab_sort_descending
+
+
+def set_tab_sort_descending(descending: bool) -> bool:
+    """Overrides the dated (monthly period) tabs' left-to-right order at
+    runtime - persists to the DB so it survives restarts. Takes effect on
+    the next sync/reorder pass, not retroactively."""
+    global _current_tab_sort_descending
+    with session_scope() as session:
+        AppSettingRepository(session).set(PERIOD_TAB_SORT_DIRECTION_KEY, "desc" if descending else "asc")
+    _current_tab_sort_descending = descending
+    logger.info("Period tab order changed to %s", "descending (newest first)" if descending else "ascending (oldest first)")
+    return descending
+
+
 def start() -> None:
-    global _scheduler, _current_interval, _current_sort_descending
+    global _scheduler, _current_interval, _current_sort_descending, _current_tab_sort_descending
     if _scheduler is not None:
         return
     if settings.credentials_configured:
@@ -203,8 +246,10 @@ def start() -> None:
     with session_scope() as session:
         override = AppSettingRepository(session).get(SYNC_INTERVAL_KEY)
         sort_override = AppSettingRepository(session).get(SHEET_SORT_DIRECTION_KEY)
+        tab_sort_override = AppSettingRepository(session).get(PERIOD_TAB_SORT_DIRECTION_KEY)
     _current_interval = max(int(override), MIN_INTERVAL_SECONDS) if override else settings.sync_interval_seconds
     _current_sort_descending = sort_override != "asc"
+    _current_tab_sort_descending = tab_sort_override != "asc"
 
     _scheduler = BackgroundScheduler(daemon=True)
     _scheduler.add_job(run_once, "interval", seconds=_current_interval,

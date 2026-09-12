@@ -36,6 +36,7 @@ def config():
         "sync_interval_default": settings.sync_interval_seconds,
         "sync_interval_min": scheduler.MIN_INTERVAL_SECONDS,
         "sheet_sort_descending": scheduler.get_sort_descending(),
+        "period_tab_sort_descending": scheduler.get_tab_sort_descending(),
     }
 
 
@@ -68,6 +69,23 @@ def compact_sheet_now():
     (newest first) immediately, without waiting for the next scheduled
     sync - this normally already happens as part of every sync cycle."""
     return scheduler.run_compact_and_sort_once()
+
+
+@router.post("/tab_order_direction")
+def set_tab_order_direction(payload: SortDirectionIn):
+    """Sets which direction the dated (monthly period) tabs are kept
+    ordered in, left to right, on every sync - newest first (descending,
+    the default) or oldest first (ascending)."""
+    effective = scheduler.set_tab_sort_descending(payload.descending)
+    return {"period_tab_sort_descending": effective}
+
+
+@router.post("/reorder_tabs")
+def reorder_tabs_now():
+    """Re-sorts the dated tabs' left-to-right order immediately, without
+    waiting for the next scheduled sync - this normally already happens as
+    part of every sync cycle."""
+    return scheduler.run_reorder_tabs_once()
 
 
 @router.get("/logs")

@@ -6,6 +6,7 @@ from app.models import AppSetting
 
 SYNC_INTERVAL_KEY = "sync_interval_seconds"
 SHEET_SORT_DIRECTION_KEY = "sheet_sort_direction"  # "desc" (default, newest first) or "asc"
+PERIOD_TAB_SORT_DIRECTION_KEY = "period_tab_sort_direction"  # "desc" (default) or "asc" - left-to-right order of dated tabs
 
 
 class AppSettingRepository:

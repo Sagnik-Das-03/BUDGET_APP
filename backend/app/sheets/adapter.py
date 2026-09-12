@@ -89,6 +89,21 @@ class GoogleSheetsService:
                 return s.sheet_id
         return self.create_sheet(spreadsheet_id, title)
 
+    def reorder_sheets(self, spreadsheet_id: str, sheet_ids_in_order: list[int]) -> None:
+        """Moves tabs to match sheet_ids_in_order (left to right). Setting
+        each sheet's `index` to its position in this list, in ascending
+        order, within one batchUpdate is the standard way to reorder Sheets
+        tabs - applied in order, each move is resolved against the layout
+        as of the previous one in the same batch, which is what makes the
+        whole sequence converge on the target order in a single call."""
+        if not sheet_ids_in_order:
+            return
+        requests = [
+            {"updateSheetProperties": {"properties": {"sheetId": sid, "index": i}, "fields": "index"}}
+            for i, sid in enumerate(sheet_ids_in_order)
+        ]
+        self.batch_format(spreadsheet_id, requests)
+
     # ---------- values ----------
 
     def get_rows(self, spreadsheet_id: str, sheet_name: str) -> list[list[str]]:

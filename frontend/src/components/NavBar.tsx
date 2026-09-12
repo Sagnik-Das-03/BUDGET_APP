@@ -6,6 +6,7 @@ import {
 import { cn } from '@/lib/utils';
 import { SyncStatusWidget } from './SyncStatus';
 import { ModeToggle } from './ModeToggle';
+import { LogsDrawer } from './LogsDrawer';
 
 const LINKS = [
   { to: '/', label: 'Dashboard', end: true, icon: LayoutDashboard },
@@ -16,7 +17,6 @@ const LINKS = [
   { to: '/trash', label: 'Trash', icon: Trash2 },
   { to: '/ask', label: 'Ask', icon: Sparkles },
   { to: '/settings', label: 'Settings', icon: Settings },
-  { to: '/logs', label: 'Logs', icon: ScrollText },
 ];
 
 export function NavBar() {
@@ -45,6 +45,17 @@ export function NavBar() {
             {l.label}
           </NavLink>
         ))}
+        <LogsDrawer
+          trigger={
+            <button
+              type="button"
+              className="flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm font-medium text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
+            >
+              <ScrollText className="size-4 shrink-0" />
+              Logs
+            </button>
+          }
+        />
       </nav>
       <div className="flex flex-col gap-2.5 border-t px-3 py-3">
         <SyncStatusWidget />

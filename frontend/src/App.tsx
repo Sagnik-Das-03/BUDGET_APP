@@ -8,7 +8,6 @@ import { Conflicts } from './pages/Conflicts';
 import { Trash } from './pages/Trash';
 import { Ask } from './pages/Ask';
 import { Settings } from './pages/Settings';
-import { Logs } from './pages/Logs';
 
 export function App() {
   return (
@@ -26,7 +25,6 @@ export function App() {
               <Route path="/trash" element={<Trash />} />
               <Route path="/ask" element={<Ask />} />
               <Route path="/settings" element={<Settings />} />
-              <Route path="/logs" element={<Logs />} />
             </Routes>
           </div>
         </main>

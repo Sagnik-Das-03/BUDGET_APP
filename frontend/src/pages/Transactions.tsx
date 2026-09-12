@@ -1,6 +1,6 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight, Pencil, Plus, Sparkles, Trash2, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Lock, Pencil, Plus, Sparkles, Trash2, Unlock, X } from 'lucide-react';
 import { api } from '../lib/api';
 import { fmtMoney } from '../lib/format';
 import { useLocalStorage } from '../lib/useLocalStorage';
@@ -11,6 +11,8 @@ import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { MultiSelectFilter } from '@/components/MultiSelectFilter';
@@ -108,6 +110,10 @@ export function Transactions() {
   const [quickAddText, setQuickAddText] = useState('');
   const [savedViews, setSavedViews] = useLocalStorage<SavedView[]>('budget_tracker.savedViews', []);
   const [compareIds, setCompareIds] = useState<Set<string>>(new Set());
+  // Per-device, not a server setting - a lightweight "don't let me fat-finger
+  // an edit" guard, not an access-control mechanism (the API itself is
+  // unaffected either way).
+  const [editsLocked, setEditsLocked] = useLocalStorage('budget_tracker.transactionsEditsLocked', false);
 
   const categories = useQuery({ queryKey: ['categories'], queryFn: api.listCategories });
   const accounts = useQuery({ queryKey: ['accounts'], queryFn: api.listAccounts });
@@ -336,7 +342,14 @@ export function Transactions() {
 
   return (
     <>
-      <h1 className="text-2xl font-bold tracking-tight">Transactions</h1>
+      <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+        <h1 className="text-2xl font-bold tracking-tight">Transactions</h1>
+        <label className="flex items-center gap-2 text-sm">
+          {editsLocked ? <Lock className="size-4 text-muted-foreground" /> : <Unlock className="size-4 text-muted-foreground" />}
+          <Label className="text-sm text-muted-foreground">{editsLocked ? 'Edits locked' : 'Edits enabled'}</Label>
+          <Switch checked={!editsLocked} onCheckedChange={(v) => setEditsLocked(!v)} aria-label="Enable editing transactions" />
+        </label>
+      </div>
       <p className="mb-5 mt-1 text-sm text-muted-foreground">Every transaction across every month and year, in one place.</p>
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -347,8 +360,9 @@ export function Transactions() {
           onChange={(e) => setQuickAddText(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') runQuickAdd(); }}
           className="max-w-xs"
+          disabled={editsLocked}
         />
-        <Button variant="outline" size="sm" disabled={quickAdd.isPending || !quickAddText.trim()} onClick={runQuickAdd}>
+        <Button variant="outline" size="sm" disabled={editsLocked || quickAdd.isPending || !quickAddText.trim()} onClick={runQuickAdd}>
           {quickAdd.isPending ? 'Parsing…' : 'Add'}
         </Button>
         <ModelBadge task="quick_add" />
@@ -401,7 +415,7 @@ export function Transactions() {
           </Button>
         )}
         {hasActiveFilters && <SaveViewPopover filters={currentFiltersSnapshot()} onSave={saveCurrentView} />}
-        <Button size="sm" onClick={() => setShowAddForm(!showAddForm)}>
+        <Button size="sm" disabled={editsLocked} onClick={() => setShowAddForm(!showAddForm)}>
           <Plus className="size-4" /> Add Transactions
         </Button>
       </div>
@@ -467,7 +481,7 @@ export function Transactions() {
           <Button
             variant="destructive"
             size="sm"
-            disabled={bulkDelete.isPending}
+            disabled={editsLocked || bulkDelete.isPending}
             onClick={async () => {
               if (await confirm(`Delete ${selected.size} selected transaction${selected.size === 1 ? '' : 's'}? This cannot be undone from the UI.`)) {
                 bulkDelete.mutate(Array.from(selected));
@@ -665,10 +679,10 @@ export function Transactions() {
                   <TableCell className="text-right tabular-nums">{fmtMoney(t.amount)}</TableCell>
                   <TableCell><Badge variant={SYNC_VARIANT[t.sync_status] ?? 'secondary'}>{t.sync_status}</Badge></TableCell>
                   <TableCell className="whitespace-nowrap">
-                    <Button variant="outline" size="sm" onClick={() => startEdit(t)}>
+                    <Button variant="outline" size="sm" disabled={editsLocked} onClick={() => startEdit(t)}>
                       <Pencil className="size-4" />
                     </Button>
-                    <Button variant="destructive" size="sm" className="ml-1.5" onClick={async () => {
+                    <Button variant="destructive" size="sm" className="ml-1.5" disabled={editsLocked} onClick={async () => {
                       if (await confirm('Delete this transaction?')) deleteTxn.mutate(t.transaction_id);
                     }}>Delete</Button>
                   </TableCell>

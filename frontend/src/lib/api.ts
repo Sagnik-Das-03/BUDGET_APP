@@ -181,5 +181,9 @@ export const api = {
     request<{ sheet_sort_descending: boolean }>('/api/sync/sort_direction', { method: 'POST', body: JSON.stringify({ descending }) }),
   compactSheetNow: () =>
     request<{ removed_blank: number; reordered: boolean } | { error: string }>('/api/sync/compact', { method: 'POST' }),
+  setTabOrderDirection: (descending: boolean) =>
+    request<{ period_tab_sort_descending: boolean }>('/api/sync/tab_order_direction', { method: 'POST', body: JSON.stringify({ descending }) }),
+  reorderTabsNow: () =>
+    request<{ reordered: boolean } | { error: string }>('/api/sync/reorder_tabs', { method: 'POST' }),
   syncLogs: () => request<SyncLogEntry[]>('/api/sync/logs?limit=200'),
 };

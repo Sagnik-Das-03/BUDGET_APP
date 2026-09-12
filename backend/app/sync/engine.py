@@ -197,9 +197,10 @@ def push(session: Session, sheets: GoogleSheetsService, spreadsheet_id: str,
 
 
 def run_sync_cycle(session: Session, sheets: GoogleSheetsService, spreadsheet_id: str,
-                    sort_descending: bool = True) -> SyncSummary:
+                    sort_descending: bool = True, tab_sort_descending: bool = True) -> SyncSummary:
     sync_repo = SyncRepository(session)
-    summary = SyncSummary(pull=None, push=None, compact=None, periods_discovered=[], reports=None, errors=[])
+    summary = SyncSummary(pull=None, push=None, compact=None, periods_discovered=[],
+                           reports=None, tab_order=None, errors=[])
 
     try:
         raw_rows = _ensure_transactions_sheet(session, sheets, spreadsheet_id)
@@ -266,6 +267,17 @@ def run_sync_cycle(session: Session, sheets: GoogleSheetsService, spreadsheet_id
     else:
         summary["reports"] = "skipped (nothing changed this cycle)"
 
+    try:
+        # Runs after report regeneration so any dated tab created THIS cycle
+        # (a newly-discovered period) is already present to be placed in order,
+        # rather than staying out of place until the next cycle catches it.
+        summary["tab_order"] = periods_mod.reorder_period_tabs(sheets, spreadsheet_id, descending=tab_sort_descending)
+    except Exception as e:
+        logger.exception("period tab reorder failed")
+        sync_repo.log(f"Period tab reorder failed: {e}", LogLevel.error)
+        session.commit()
+        summary["errors"].append(f"tab_order: {e}")
+
     sync_repo.touch_meta(spreadsheet_id, TRANSACTIONS_SHEET)
     # pull() still has to run every cycle regardless (it's the only way to notice
     # something added outside the app - the mobile quick-add form, a manual sheet
@@ -276,7 +288,8 @@ def run_sync_cycle(session: Session, sheets: GoogleSheetsService, spreadsheet_id
     # it never touches the DB and so doesn't warrant regenerating reports.
     compact_result = summary.get("compact") or {}
     compact_changed = compact_result.get("removed_blank", 0) > 0 or compact_result.get("reordered", False)
-    if data_changed or compact_changed or summary["errors"]:
+    tab_order_changed = (summary.get("tab_order") or {}).get("reordered", False)
+    if data_changed or compact_changed or tab_order_changed or summary["errors"]:
         level = LogLevel.error if summary["errors"] else LogLevel.info
         sync_repo.log(f"Sync cycle complete: {dict(summary)}", level)
     session.commit()
