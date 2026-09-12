@@ -16,8 +16,8 @@ def test_orders_dated_tabs_newest_first_by_default(sheets):
 
     assert result["reordered"] is True
     assert _titles(sheets) == [
-        "Transactions", "Dashboard", "2026-06", "2026-05", "2026-04", "2026-01", "2025-12",
-        "Monthly Breakdown", "Weekly Summary", "Yearly Summary",
+        "Transactions", "Dashboard", "Yearly Summary", "Monthly Breakdown", "Weekly Summary",
+        "2026-06", "2026-05", "2026-04", "2026-01", "2025-12",
     ]
 
 
@@ -32,8 +32,8 @@ def test_orders_dated_tabs_oldest_first_when_requested(sheets):
 
 
 def test_no_op_when_already_in_order(sheets):
-    for title in ["Transactions", "Dashboard", "2026-06", "2026-05", "2026-04",
-                  "Monthly Breakdown", "Weekly Summary", "Yearly Summary"]:
+    for title in ["Transactions", "Dashboard", "Yearly Summary", "Monthly Breakdown", "Weekly Summary",
+                  "2026-06", "2026-05", "2026-04"]:
         sheets.ensure_sheet(SPREADSHEET_ID, title)
 
     result = reorder_period_tabs(sheets, SPREADSHEET_ID)

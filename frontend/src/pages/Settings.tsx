@@ -207,8 +207,9 @@ export function Settings() {
             {reorderTabs.isPending ? 'Reordering…' : 'Reorder Tabs Now'}
           </Button>
           <span className="w-full text-xs text-muted-foreground">
-            Keeps the monthly tabs (2026-04, 2026-05, ...) in this order left to right in the spreadsheet's tab bar -
-            a new month is otherwise just appended wherever the tab bar happens to end. Runs on every sync too.
+            Keeps the tab bar as Transactions, Dashboard, Yearly Summary, Monthly Breakdown, Weekly Summary, then
+            every monthly tab (2026-04, 2026-05, ...) in the order above - a new month is otherwise just appended
+            wherever the tab bar happens to end. Runs on every sync too.
           </span>
           {reorderTabsMessage && <span className="w-full text-xs text-muted-foreground">{reorderTabsMessage}</span>}
         </CardContent>

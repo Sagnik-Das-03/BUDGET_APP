@@ -27,7 +27,7 @@ const SYNC_VARIANT: Record<string, 'default' | 'secondary' | 'destructive' | 'ou
 };
 
 const ANY = '__any__';
-const PAGE_SIZE = 50;
+const PAGE_SIZE_OPTIONS = [25, 50, 100];
 
 let nextRowId = 1;
 interface NewRow {
@@ -105,6 +105,7 @@ export function Transactions() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [newRows, setNewRows] = useState<NewRow[]>([emptyRow()]);
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useLocalStorage('budget_tracker.transactionsPageSize', 50);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<EditDraft | null>(null);
   const [quickAddText, setQuickAddText] = useState('');
@@ -183,9 +184,9 @@ export function Transactions() {
 
   const filteredTotals = useMemo(() => computeTotals(transactions.data ?? []), [transactions.data]);
 
-  const totalPages = Math.max(1, Math.ceil((transactions.data?.length ?? 0) / PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil((transactions.data?.length ?? 0) / pageSize));
   const currentPage = Math.min(page, totalPages);
-  const pagedRows = (transactions.data ?? []).slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  const pagedRows = (transactions.data ?? []).slice((currentPage - 1) * pageSize, currentPage * pageSize);
   const allVisibleSelected = !!pagedRows.length && pagedRows.every((t) => selected.has(t.transaction_id));
 
   const validRows = newRows.filter((r) => r.description.trim() && r.category && parseFloat(r.amount) > 0);
@@ -695,9 +696,17 @@ export function Transactions() {
 
       {!!transactions.data?.length && (
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
-          <span>
-            Showing {(currentPage - 1) * PAGE_SIZE + 1}–{Math.min(currentPage * PAGE_SIZE, transactions.data.length)} of {transactions.data.length}
-          </span>
+          <div className="flex items-center gap-2.5">
+            <span>
+              Showing {(currentPage - 1) * pageSize + 1}–{Math.min(currentPage * pageSize, transactions.data.length)} of {transactions.data.length}
+            </span>
+            <Select value={String(pageSize)} onValueChange={(v) => { setPageSize(Number(v)); setPage(1); }}>
+              <SelectTrigger size="sm" className="w-[110px]"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {PAGE_SIZE_OPTIONS.map((n) => <SelectItem key={n} value={String(n)}>{n} / page</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" disabled={currentPage <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
               <ChevronLeft className="size-4" /> Previous

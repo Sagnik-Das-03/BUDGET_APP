@@ -45,21 +45,21 @@ def reorder_period_tabs(sheets: GoogleSheetsService, spreadsheet_id: str, descen
     wherever the tab bar happens to end at creation time, so left alone
     they drift into a jumbled, non-chronological order over time.
 
-    Final layout: Transactions, Dashboard, every dated tab in the chosen
-    order, then the three generated summary tabs (Monthly Breakdown, Weekly
-    Summary, Yearly Summary). Any other, unrecognized tab (a user's own
-    custom sheet) is left in its current relative position, appended after
-    all of the above rather than disturbed."""
+    Final layout: Transactions, Dashboard, Yearly Summary, Monthly
+    Breakdown, Weekly Summary, then every dated tab in the chosen order.
+    Any other, unrecognized tab (a user's own custom sheet) is left in its
+    current relative position, appended after all of the above rather than
+    disturbed."""
     all_sheets = sheets.get_sheets(spreadsheet_id)
     by_title = {s.title: s.sheet_id for s in all_sheets}
 
     dated_titles = sorted((t for t in by_title if PERIOD_RE.match(t)), reverse=descending)
-    front = [t for t in ("Transactions", "Dashboard") if t in by_title]
-    back = [t for t in ("Monthly Breakdown", "Weekly Summary", "Yearly Summary") if t in by_title]
-    placed = set(front) | set(dated_titles) | set(back)
+    front = [t for t in ("Transactions", "Dashboard", "Yearly Summary", "Monthly Breakdown", "Weekly Summary")
+             if t in by_title]
+    placed = set(front) | set(dated_titles)
     other = [s.title for s in all_sheets if s.title not in placed]
 
-    target_titles = front + dated_titles + back + other
+    target_titles = front + dated_titles + other
     target_ids = [by_title[t] for t in target_titles]
     current_ids = [s.sheet_id for s in all_sheets]
 
