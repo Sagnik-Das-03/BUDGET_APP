@@ -47,6 +47,22 @@ export interface AskResponse {
   category: string | null;
   transaction_type: string | null;
   range: string;
+  thread_id: number | null;
+  duration_sec: number | null;
+}
+
+export interface ChatThread {
+  id: number;
+  title: string;
+  updated_at: string;
+}
+
+export interface ChatMessage {
+  id: number;
+  question: string;
+  answer: string;
+  duration_sec: number | null;
+  created_at: string;
 }
 
 export interface LlmStatus {

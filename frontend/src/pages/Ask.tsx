@@ -1,7 +1,8 @@
-import { useMutation } from '@tanstack/react-query';
-import { useRef, useState } from 'react';
-import { Send } from 'lucide-react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect, useRef, useState } from 'react';
+import { Plus, Send, X } from 'lucide-react';
 import { api } from '../lib/api';
+import type { ChatMessage } from '../lib/types';
 import { useElapsedSeconds } from '../lib/useElapsedSeconds';
 import { ModelBadge } from '../components/ModelBadge';
 import { Button } from '@/components/ui/button';
@@ -19,17 +20,75 @@ const EXAMPLES = [
   'what is my average shopping expense?',
 ];
 
+function toExchange(m: ChatMessage): Exchange {
+  return { question: m.question, answer: m.answer, durationSec: m.duration_sec ?? undefined };
+}
+
 export function Ask() {
+  const queryClient = useQueryClient();
+  const threads = useQuery({ queryKey: ['chatThreads'], queryFn: () => api.chatThreads() });
+
+  // null = an unsaved "new chat" draft - no thread exists in the DB until the
+  // first question is actually sent, so clicking "+" repeatedly doesn't litter
+  // empty threads.
+  const [activeId, setActiveId] = useState<number | null>(null);
+  const [draftHistory, setDraftHistory] = useState<Exchange[]>([]);
   const [question, setQuestion] = useState('');
-  const [history, setHistory] = useState<Exchange[]>([]);
+
+  const messages = useQuery({
+    queryKey: ['chatMessages', activeId],
+    queryFn: () => api.chatMessages(activeId as number),
+    enabled: activeId !== null,
+  });
+
+  const history: Exchange[] = activeId === null ? draftHistory : (messages.data ?? []).map(toExchange);
 
   const startRef = useRef(0);
   const ask = useMutation({
-    mutationFn: (q: string) => api.ask(q),
-    onSuccess: (res, q) => setHistory((h) => [...h, { question: q, answer: res.answer, durationSec: (Date.now() - startRef.current) / 1000 }]),
-    onError: (err: Error, q) => setHistory((h) => [...h, { question: q, answer: `Error: ${err.message}` }]),
+    mutationFn: (q: string) => api.ask(q, activeId),
+    onSuccess: (res, q) => {
+      const exchange: Exchange = {
+        question: q, answer: res.answer,
+        durationSec: res.duration_sec ?? (Date.now() - startRef.current) / 1000,
+      };
+      if (activeId === null && res.thread_id) {
+        queryClient.setQueryData(['chatMessages', res.thread_id], [
+          { id: 0, question: q, answer: res.answer, duration_sec: exchange.durationSec ?? null, created_at: new Date().toISOString() },
+        ]);
+        setActiveId(res.thread_id);
+        setDraftHistory([]);
+      } else if (activeId !== null) {
+        queryClient.setQueryData(['chatMessages', activeId], (old: ChatMessage[] | undefined) => [
+          ...(old ?? []),
+          { id: Date.now(), question: q, answer: res.answer, duration_sec: exchange.durationSec ?? null, created_at: new Date().toISOString() },
+        ]);
+      }
+      queryClient.invalidateQueries({ queryKey: ['chatThreads'] });
+    },
+    onError: (err: Error, q) => {
+      const exchange: Exchange = { question: q, answer: `Error: ${err.message}` };
+      if (activeId === null) setDraftHistory((h) => [...h, exchange]);
+      else queryClient.setQueryData(['chatMessages', activeId], (old: ChatMessage[] | undefined) => [
+        ...(old ?? []), { id: Date.now(), question: q, answer: exchange.answer, duration_sec: null, created_at: new Date().toISOString() },
+      ]);
+    },
   });
   const elapsed = useElapsedSeconds(ask.isPending);
+
+  const deleteThread = useMutation({
+    mutationFn: (id: number) => api.deleteChatThread(id),
+    onSuccess: (_res, id) => {
+      queryClient.invalidateQueries({ queryKey: ['chatThreads'] });
+      queryClient.removeQueries({ queryKey: ['chatMessages', id] });
+      if (activeId === id) startNewChat();
+    },
+  });
+
+  function startNewChat() {
+    setActiveId(null);
+    setDraftHistory([]);
+    setQuestion('');
+  }
 
   function submit(q: string) {
     const trimmed = q.trim();
@@ -39,17 +98,56 @@ export function Ask() {
     setQuestion('');
   }
 
+  // If the active thread got deleted from another tab/session, fall back to a fresh draft.
+  useEffect(() => {
+    if (activeId !== null && threads.data && !threads.data.some((t) => t.id === activeId)) {
+      startNewChat();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [threads.data, activeId]);
+
   return (
     <>
       <div className="flex items-center gap-2.5">
         <h1 className="text-2xl font-bold tracking-tight">Ask Your Budget</h1>
         <ModelBadge task="query_parse" />
       </div>
-      <p className="mb-5 mt-1 text-sm text-muted-foreground">
+      <p className="mb-4 mt-1 text-sm text-muted-foreground">
         Ask about your spending in plain English. A local AI model turns your question into a
         query over your own transactions, then another pass phrases the final answer — neither
         one does the arithmetic itself, that's computed straight from your data every time.
       </p>
+
+      <div className="mb-4 flex flex-wrap items-center gap-1.5 border-b pb-2">
+        {(threads.data ?? []).map((t) => (
+          <div
+            key={t.id}
+            className={`group flex max-w-[220px] items-center gap-1.5 rounded-t-md border border-b-0 px-3 py-1.5 text-xs cursor-pointer ${
+              t.id === activeId ? 'bg-background font-medium' : 'bg-muted/50 text-muted-foreground hover:bg-muted'
+            }`}
+            onClick={() => setActiveId(t.id)}
+          >
+            <span className="truncate">{t.title}</span>
+            <button
+              type="button"
+              aria-label="Delete chat"
+              className="rounded-sm opacity-0 group-hover:opacity-100 hover:bg-destructive/20"
+              onClick={(e) => { e.stopPropagation(); deleteThread.mutate(t.id); }}
+            >
+              <X className="size-3" />
+            </button>
+          </div>
+        ))}
+        <button
+          type="button"
+          className={`flex items-center gap-1 rounded-t-md border border-b-0 px-2.5 py-1.5 text-xs ${
+            activeId === null ? 'bg-background font-medium' : 'bg-muted/50 text-muted-foreground hover:bg-muted'
+          }`}
+          onClick={startNewChat}
+        >
+          <Plus className="size-3.5" /> New
+        </button>
+      </div>
 
       {history.length === 0 && !ask.isPending && (
         <div className="mb-4 flex flex-wrap gap-2">

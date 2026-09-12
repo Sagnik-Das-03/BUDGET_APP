@@ -1,4 +1,5 @@
 import re
+import time
 from datetime import date as date_type, timedelta
 from typing import Optional
 
@@ -11,11 +12,12 @@ from app.db import get_session
 from app.llm.config import MODEL_DISPLAY_NAMES, TASK_MODEL
 from app.llm.router import llm_router
 from app.repositories.categories import CategoryRepository
+from app.repositories.chat import ChatRepository
 from app.repositories.transactions import TransactionRepository
 from app.schemas import (
     AskIn, AskOut, AutocompleteIn, AutocompleteOut, CategorizeIn, CategorizeOut,
-    CompareRecapIn, CompareRecapOut, InsightOut, QuickAddIn, QuickAddOut,
-    SuggestViewNameIn, SuggestViewNameOut,
+    ChatMessageOut, ChatThreadOut, CompareRecapIn, CompareRecapOut, InsightOut,
+    QuickAddIn, QuickAddOut, SuggestViewNameIn, SuggestViewNameOut,
 )
 
 router = APIRouter(prefix="/api/llm", tags=["llm"])
@@ -35,7 +37,7 @@ def _refresh_trailing_date(text: str, new_date: Optional[date_type]) -> str:
 
 _RANGE_LABELS = {
     "this_week": "this week", "this_month": "this month", "last_month": "last month",
-    "this_year": "this year", "all_time": "all time",
+    "last_3_months": "the last 3 months", "this_year": "this year", "all_time": "all time",
 }
 
 
@@ -46,6 +48,9 @@ def _resolve_named_range(range_key: str, date_from: Optional[date_type] = None,
     an addition dashboard doesn't need but chat/recap questions often do."""
     if range_key == "last_month":
         return calc._range_previous_month(calc.range_this_month()[0])
+    if range_key == "last_3_months":
+        today = date_type.today()
+        return today - timedelta(days=90), today
     return _dashboard_resolve_range(range_key, date_from, date_to)
 
 
@@ -434,119 +439,287 @@ def compare_recap(payload: CompareRecapIn, session: Session = Depends(get_sessio
     return CompareRecapOut(recap=recap_text or "Not enough data to compare these periods.")
 
 
+@router.get("/chat/threads", response_model=list[ChatThreadOut])
+def list_chat_threads(session: Session = Depends(get_session)):
+    return ChatRepository(session).list_threads()
+
+
+@router.post("/chat/threads", response_model=ChatThreadOut)
+def create_chat_thread(session: Session = Depends(get_session)):
+    thread = ChatRepository(session).create_thread()
+    session.commit()
+    return thread
+
+
+@router.get("/chat/threads/{thread_id}/messages", response_model=list[ChatMessageOut])
+def list_chat_messages(thread_id: int, session: Session = Depends(get_session)):
+    return ChatRepository(session).list_messages(thread_id)
+
+
+@router.delete("/chat/threads/{thread_id}")
+def delete_chat_thread(thread_id: int, session: Session = Depends(get_session)):
+    deleted = ChatRepository(session).delete_thread(thread_id)
+    session.commit()
+    if not deleted:
+        raise HTTPException(404, "Thread not found")
+    return {"deleted": True}
+
+
 @router.post("/ask", response_model=AskOut)
 def ask(payload: AskIn, session: Session = Depends(get_session)):
+    started_at = time.monotonic()
     question = payload.question.strip()
+    chat = ChatRepository(session)
+    thread = chat.get_thread(payload.thread_id) if payload.thread_id else None
+    if not thread:
+        thread = chat.create_thread()
+
     if not llm_router.available:
-        return AskOut(answer="AI features aren't available right now.", range="this_month")
+        answer = "AI features aren't available right now."
+        duration_sec = time.monotonic() - started_at
+        chat.add_message(thread.id, question, answer, duration_sec)
+        session.commit()
+        return AskOut(answer=answer, range="this_month", thread_id=thread.id, duration_sec=duration_sec)
+
+    # Last few exchanges in this thread, so a follow-up like "what about last
+    # month?" or "and just food?" can be resolved against what was already
+    # asked instead of being extracted as a standalone, context-free query.
+    # Capped at 5 to keep the prompt short - old exchanges matter far less
+    # than the immediately preceding one.
+    prior_messages = chat.list_messages(thread.id)[-5:]
+    history_context = "\n".join(f'Q: "{m.question}"\nA: "{m.answer}"' for m in prior_messages)
 
     categories = [c.name for c in CategoryRepository(session).list()]
+    category_repo = CategoryRepository(session)
     schema = {
         "type": "object",
         "properties": {
-            "category": {"type": "string", "enum": [*categories, "ALL"]},
+            "categories": {"type": "array", "items": {"type": "string", "enum": categories}},
+            "exclude_categories": {"type": "array", "items": {"type": "string", "enum": categories}},
             "transaction_type": {"type": "string", "enum": ["Income", "Expense", "ANY"]},
-            "range": {"type": "string", "enum": list(_RANGE_LABELS.keys())},
-            "aggregation": {"type": "string", "enum": ["sum", "count", "avg"]},
+            "range_type": {
+                "type": "string",
+                "enum": ["this_week", "this_month", "last_month", "last_n_days", "last_n_months", "this_year", "all_time"],
+            },
+            "range_n": {"type": "integer", "minimum": 1, "maximum": 365},
+            "aggregation": {"type": "string", "enum": ["sum", "count", "avg", "breakdown"]},
+            "keyword": {"type": "string"},
         },
-        "required": ["category", "transaction_type", "range", "aggregation"],
+        "required": [
+            "categories", "exclude_categories", "transaction_type", "range_type", "range_n", "aggregation", "keyword",
+        ],
         "additionalProperties": False,
     }
     prompt = (
-        f"Today's date: {date_type.today().isoformat()}\n"
-        f'User question: "{question}"\n'
-        "Extract this spending question as a structured query."
+        (f"Conversation so far in this chat:\n{history_context}\n\n" if history_context else "")
+        + f"Today's date: {date_type.today().isoformat()}\n"
+        + f'New user question: "{question}"\n'
+        + "Extract this new question as a structured query, resolving it against the conversation above if it "
+        "references something earlier (e.g. a follow-up like \"what about last month?\" or \"and just food?\")."
     )
-    # The enum constraint only guarantees a VALID category comes back, not a
-    # semantically correct one - the model still needs the actual names
-    # spelled out in readable text to match "food" to "Food-Order", etc.
+    # The enum/array constraints only guarantee STRUCTURALLY valid values come
+    # back (real category names, integers in range) - not semantically correct
+    # ones, so the model still needs the actual category names spelled out in
+    # readable text to match "food" to "Food-Order", etc. Dates are computed
+    # here in Python from range_type/range_n rather than trusting a small
+    # model's own date arithmetic, which is far more error-prone.
     system_message = (
-        "You convert a personal-finance question into a structured query.\n"
-        f"Available categories: {', '.join(categories)}. Use \"ALL\" if the question doesn't mention one of these.\n"
+        "You convert a personal-finance question into a structured query, using the conversation history (if "
+        "given) to resolve follow-up questions that don't repeat context on their own - e.g. if the previous "
+        "question was about \"Food-Order last month\" and the new one is just \"what about this month?\", carry "
+        "the category over and only change what the new question actually changed.\n"
+        f"Available categories: {', '.join(categories)}.\n"
+        "categories: specific categories the question is about - leave empty for all categories.\n"
+        'exclude_categories: categories to leave out, e.g. "...aside from rent" -> exclude_categories=["Rent"]. '
+        "Only set one of categories/exclude_categories, never both.\n"
+        "keyword: a specific merchant, item, or note mentioned in the question that ISN'T one of the categories "
+        'above - e.g. "Zomato", "Uber", "electricity bill" - searched directly against the actual transaction '
+        'descriptions instead of guessing a category for it. Leave as "" when the question is about a whole '
+        "category or is general, not one specific thing.\n"
         'transaction_type: "Income", "Expense", or "ANY" if unspecified.\n'
-        'range: "this_week", "this_month", "last_month" (the previous calendar month), "this_year" '
-        '(the current calendar year), or "all_time" (no time limit; use this if no time period is mentioned).\n'
-        'aggregation: "count" for how-many questions, "avg" for average, otherwise "sum".'
+        'range_type: "this_week", "this_month", "last_month" (the previous calendar month), "last_n_days" or '
+        '"last_n_months" (for "last/past N days|weeks|months" phrasing - use range_n for the number, and use '
+        'months for a "weeks" phrasing too), "this_year", or "all_time" (no time limit; use this if no time '
+        "period is mentioned).\n"
+        "range_n: the N for last_n_days/last_n_months (ignored otherwise - just set it to 1).\n"
+        'aggregation: "count" for how-many questions, "avg" for average, "breakdown" when the question asks '
+        'WHICH category or categories rather than for one total, otherwise "sum".'
     )
     try:
         parsed = llm_router.complete_json(
-            "query_parse", prompt, system_message=system_message, schema=schema, max_output_tokens=60,
+            "query_parse", prompt, system_message=system_message, schema=schema, max_output_tokens=120,
         )
     except Exception as e:
-        return AskOut(answer=f"Couldn't understand that question ({e}).", range="this_month")
+        answer = f"Couldn't understand that question ({e})."
+        duration_sec = time.monotonic() - started_at
+        chat.add_message(thread.id, question, answer, duration_sec)
+        session.commit()
+        return AskOut(answer=answer, range="this_month", thread_id=thread.id, duration_sec=duration_sec)
 
-    category = parsed.get("category")
-    category = category if category in categories else None
+    categories_in = [c for c in (parsed.get("categories") or []) if c in categories]
+    exclude_in = [c for c in (parsed.get("exclude_categories") or []) if c in categories]
     ttype = parsed.get("transaction_type")
     ttype = ttype if ttype in ("Income", "Expense") else None
-    range_key = parsed.get("range") if parsed.get("range") in _RANGE_LABELS else "this_month"
-    aggregation = parsed.get("aggregation") if parsed.get("aggregation") in ("sum", "count", "avg") else "sum"
+    valid_range_types = {"this_week", "this_month", "last_month", "last_n_days", "last_n_months", "this_year", "all_time"}
+    range_type = parsed.get("range_type") if parsed.get("range_type") in valid_range_types else "this_month"
+    range_n = parsed.get("range_n")
+    range_n = range_n if isinstance(range_n, int) and 1 <= range_n <= 365 else 1
+    aggregation = parsed.get("aggregation") if parsed.get("aggregation") in ("sum", "count", "avg", "breakdown") else "sum"
+    keyword = (parsed.get("keyword") or "").strip()[:80]
 
-    date_from, date_to = _resolve_named_range(range_key)
-    category_ids = None
-    if category:
-        cat = CategoryRepository(session).get_by_name(category)
-        category_ids = [cat.id] if cat else None
-
-    rows = TransactionRepository(session).filter(
-        category_ids=category_ids, transaction_type=ttype, date_from=date_from, date_to=date_to,
-    )
-
-    if aggregation == "count":
-        value = float(len(rows))
-    elif aggregation == "avg":
-        value = (sum(r.amount for r in rows) / len(rows)) if rows else 0.0
+    today = date_type.today()
+    if range_type == "last_n_days":
+        date_from, date_to = today - timedelta(days=range_n), today
+        period_label = f"the last {range_n} day{'s' if range_n != 1 else ''}"
+        range_key = "last_n_days"
+    elif range_type == "last_n_months":
+        date_from, date_to = today - timedelta(days=30 * range_n), today
+        period_label = f"the last {range_n} month{'s' if range_n != 1 else ''}"
+        range_key = "last_n_months"
     else:
-        value = sum(r.amount for r in rows)
+        date_from, date_to = _resolve_named_range(range_type)
+        period_label = _RANGE_LABELS.get(range_type, range_type)
+        range_key = range_type
 
-    period_label = _RANGE_LABELS[range_key]
-    scope = f"on {category}" if category else "overall"
+    category_ids = None
+    category_exclude = False
+    if categories_in:
+        category_ids = [c.id for c in (category_repo.get_by_name(n) for n in categories_in) if c] or None
+    elif exclude_in:
+        category_ids = [c.id for c in (category_repo.get_by_name(n) for n in exclude_in) if c] or None
+        category_exclude = True
+
+    scope_parts = []
+    if categories_in:
+        scope_parts.append(f"on {', '.join(categories_in)}")
+    elif exclude_in:
+        scope_parts.append(f"outside {', '.join(exclude_in)}")
+    if keyword:
+        scope_parts.append(f'matching "{keyword}"')
+    scope = " ".join(scope_parts) or "overall"
     type_label = f" ({ttype.lower()})" if ttype else ""
 
-    if aggregation == "count":
-        fallback_answer = f"You had {int(value)} transaction{'s' if value != 1 else ''} {scope}{type_label} {period_label}."
-    elif aggregation == "avg":
-        fallback_answer = f"Your average transaction {scope}{type_label} {period_label} was Rs {value:,.0f}."
-    elif ttype == "Income":
-        fallback_answer = f"You received Rs {value:,.0f} {scope} {period_label}."
+    # Every aggregation mode - including breakdown - is computed from this same
+    # set of actually-matching rows, rather than a separately-queried, more
+    # rigid "by category" helper: a keyword search or an exclude-list narrows
+    # the real data first, and the answer is whatever's actually found in it.
+    rows = TransactionRepository(session).filter(
+        category_ids=category_ids, category_exclude=category_exclude,
+        transaction_type=ttype, date_from=date_from, date_to=date_to,
+        search=keyword or None,
+    )
+
+    breakdown: list[dict] = []
+    if aggregation == "breakdown":
+        totals_by_category: dict[str, float] = {}
+        for r in rows:
+            name = r.category.name
+            totals_by_category[name] = totals_by_category.get(name, 0.0) + r.amount
+        breakdown = sorted(
+            ({"category": name, "total": round(total, 2)} for name, total in totals_by_category.items()),
+            key=lambda b: -b["total"],
+        )[:8]
+
+        value = breakdown[0]["total"] if breakdown else 0.0
+        if not breakdown:
+            fallback_answer = f"No transactions found {scope}{type_label} {period_label}."
+        else:
+            top = breakdown[0]
+            fallback_answer = (
+                f"Your top category {scope} {period_label} was {top['category']} at Rs {top['total']:,.0f}."
+            )
     else:
-        fallback_answer = f"You spent Rs {value:,.0f} {scope}{type_label} {period_label}."
+        if aggregation == "count":
+            value = float(len(rows))
+        elif aggregation == "avg":
+            value = (sum(r.amount for r in rows) / len(rows)) if rows else 0.0
+        else:
+            value = sum(r.amount for r in rows)
+
+        if aggregation == "count":
+            fallback_answer = f"You had {int(value)} transaction{'s' if value != 1 else ''} {scope}{type_label} {period_label}."
+        elif aggregation == "avg":
+            fallback_answer = f"Your average transaction {scope}{type_label} {period_label} was Rs {value:,.0f}."
+        elif ttype == "Income":
+            fallback_answer = f"You received Rs {value:,.0f} {scope} {period_label}."
+        else:
+            fallback_answer = f"You spent Rs {value:,.0f} {scope}{type_label} {period_label}."
 
     # A second, short model call to phrase the final answer naturally instead
     # of returning the rigid template above verbatim - it still does none of
     # the arithmetic (that already happened in Python above), it only gets to
-    # choose how to say it. Grounded with the period's real totals as extra
-    # context it MAY reference (e.g. "that's a third of your spending this
-    # month") but the computed answer's own number is the one that must
-    # appear - the fallback template is used verbatim if this call fails.
+    # choose how to say it. Grounded with the period's real totals (and, for a
+    # breakdown query, the actual computed breakdown) as context it MAY
+    # reference, but the computed number(s) above are what must appear - the
+    # fallback template is used verbatim if this call fails.
     answer = fallback_answer
     if llm_router.available:
         period_totals = calc.totals(session, date_from, date_to)
+        if aggregation == "breakdown":
+            lines = "\n".join(f"- {r['category']}: Rs {r['total']:,.0f}" for r in breakdown) or "- (none)"
+            computed_line = f"Computed breakdown ({scope}{type_label}, {period_label}):\n{lines}\n"
+        else:
+            computed_line = (
+                f"Computed answer: {aggregation} = Rs {value:,.0f}, {scope}{type_label}, {period_label} "
+                f"(from {len(rows)} transaction{'s' if len(rows) != 1 else ''}).\n"
+            )
+            # The extractor above resolves to only ONE aggregation, so a compound
+            # question (e.g. "...and which category aside from rent") would have
+            # no real data for its second half without this - the phrasing model
+            # would otherwise fabricate a category/percentage to sound complete.
+            if not categories_in:
+                extra = calc.by_category(session, date_from, date_to, transaction_type="Expense")
+                if exclude_in:
+                    extra = [r for r in extra if r["category"] not in exclude_in]
+                extra = extra[:6]
+                if extra:
+                    extra_lines = "\n".join(f"- {r['category']}: Rs {r['total']:,.0f}" for r in extra)
+                    computed_line += f"\nTop expense categories this period (only ones you may name):\n{extra_lines}\n"
+        last_exchange = prior_messages[-1] if prior_messages else None
         prompt = (
-            f'User question: "{question}"\n'
-            f"Computed answer: {aggregation} = Rs {value:,.0f}, {scope}{type_label}, {period_label} "
-            f"(from {len(rows)} transaction{'s' if len(rows) != 1 else ''}).\n"
-            f"Period totals for context - Income: Rs {period_totals['income']:,.0f}, "
+            (f'Previous exchange - Q: "{last_exchange.question}" A: "{last_exchange.answer}"\n' if last_exchange else "")
+            + f'User question: "{question}"\n'
+            + f"{computed_line}"
+            + f"Period totals for context - Income: Rs {period_totals['income']:,.0f}, "
             f"Expenses: Rs {period_totals['expenses']:,.0f}, Net: Rs {period_totals['net']:,.0f}.\n\n"
-            "Answer the user's question directly in ONE natural, friendly sentence, using the computed "
-            "answer above as the headline number. You may reference the period totals for extra context "
-            "(e.g. what share of expenses this represents) only if the arithmetic is simple and exact - "
-            "never invent a number that isn't derivable from the ones given."
+            "Answer the user's question directly in ONE-TWO natural, friendly sentences, using the computed "
+            "answer/breakdown above as the headline. If this is a follow-up to the previous exchange, phrase it "
+            "so the reply flows naturally from that (e.g. \"and last month it was...\") instead of repeating "
+            "yourself verbatim. You may reference the period totals for extra context only if the arithmetic is "
+            "simple and exact - if the question asks about something not covered by the numbers given, say you "
+            "don't have that instead of guessing. Never invent a number, category, or percentage that isn't "
+            "derivable from the ones given."
         )
         try:
             llm_answer = llm_router.complete(
                 "summarize", prompt,
                 system_message="You are a precise personal-finance assistant. Never invent figures - only use the ones given.",
-                max_output_tokens=80,
+                max_output_tokens=130,
             ).strip()
             if llm_answer:
                 answer = llm_answer
         except Exception:
             pass  # fallback_answer already set
 
+    duration_sec = time.monotonic() - started_at
+    chat.add_message(thread.id, question, answer, duration_sec)
+    session.commit()
+
+    if aggregation == "breakdown":
+        return AskOut(
+            answer=answer,
+            amount=round(value, 2) if breakdown else None,
+            count=len(breakdown),
+            category=breakdown[0]["category"] if breakdown else None,
+            transaction_type=ttype, range=range_key,
+            thread_id=thread.id, duration_sec=duration_sec,
+        )
+
     return AskOut(
         answer=answer,
         amount=round(value, 2) if aggregation != "count" else None,
         count=int(value) if aggregation == "count" else len(rows),
-        category=category, transaction_type=ttype, range=range_key,
+        category=categories_in[0] if len(categories_in) == 1 else None,
+        transaction_type=ttype, range=range_key,
+        thread_id=thread.id, duration_sec=duration_sec,
     )

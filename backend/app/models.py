@@ -172,6 +172,35 @@ class SyncMeta(Base):
     last_row_count: Mapped[int] = mapped_column(Integer, default=0)
 
 
+class ChatThread(Base):
+    """One tab in the Ask page - a running conversation of question/answer
+    exchanges, kept so history survives a page reload and old threads can be
+    deleted individually rather than losing everything at once."""
+    __tablename__ = "chat_threads"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    title: Mapped[str] = mapped_column(String(120), default="New chat")
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    messages: Mapped[list["ChatMessage"]] = relationship(
+        back_populates="thread", cascade="all, delete-orphan", order_by="ChatMessage.id",
+    )
+
+
+class ChatMessage(Base):
+    __tablename__ = "chat_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    thread_id: Mapped[int] = mapped_column(ForeignKey("chat_threads.id"), nullable=False, index=True)
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    answer: Mapped[str] = mapped_column(Text, nullable=False)
+    duration_sec: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    thread: Mapped["ChatThread"] = relationship(back_populates="messages")
+
+
 class SyncLog(Base):
     __tablename__ = "sync_logs"
 

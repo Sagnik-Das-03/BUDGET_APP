@@ -1,9 +1,9 @@
 import type {
   Account, AskResponse, Budget, BudgetAlert, BudgetVsActual, Category, CategoryDrilldownNode,
-  CategoryTotal, CategoryTrend, CategoryVolatility, ChartPalette, ConflictRow, EssentialSplit, Highlights,
-  ImportCommitResult, ImportPreviewResult, ImportRowIn, Insight, LlmStatus, MonthlyBreakdownRow, QuickAddResult,
-  SavingsGoalProgress, SavingsStreak, SpendConcentration, SpendingPattern, SyncConfig, SyncLogEntry, SyncStatus,
-  Totals, Transaction, TrashedTransaction, TrendForRange, ViewFilters,
+  CategoryTotal, CategoryTrend, CategoryVolatility, ChartPalette, ChatMessage, ChatThread, ConflictRow,
+  EssentialSplit, Highlights, ImportCommitResult, ImportPreviewResult, ImportRowIn, Insight, LlmStatus,
+  MonthlyBreakdownRow, QuickAddResult, SavingsGoalProgress, SavingsStreak, SpendConcentration, SpendingPattern,
+  SyncConfig, SyncLogEntry, SyncStatus, Totals, Transaction, TrashedTransaction, TrendForRange, ViewFilters,
 } from './types';
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -141,8 +141,15 @@ export const api = {
     label_a: string; label_b: string; date_from_a: string; date_to_a: string;
     date_from_b: string; date_to_b: string;
   }) => request<{ recap: string }>('/api/llm/compare_recap', { method: 'POST', body: JSON.stringify(payload) }),
-  ask: (question: string) =>
-    request<AskResponse>('/api/llm/ask', { method: 'POST', body: JSON.stringify({ question }) }),
+  ask: (question: string, threadId?: number | null) =>
+    request<AskResponse>('/api/llm/ask', {
+      method: 'POST', body: JSON.stringify({ question, thread_id: threadId ?? null }),
+    }),
+  chatThreads: () => request<ChatThread[]>('/api/llm/chat/threads'),
+  createChatThread: () => request<ChatThread>('/api/llm/chat/threads', { method: 'POST' }),
+  chatMessages: (threadId: number) => request<ChatMessage[]>(`/api/llm/chat/threads/${threadId}/messages`),
+  deleteChatThread: (threadId: number) =>
+    request<{ deleted: boolean }>(`/api/llm/chat/threads/${threadId}`, { method: 'DELETE' }),
   quickAdd: (text: string) =>
     request<QuickAddResult>('/api/llm/quick_add', { method: 'POST', body: JSON.stringify({ text }) }),
 

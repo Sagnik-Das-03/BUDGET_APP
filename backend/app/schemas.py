@@ -150,6 +150,7 @@ class QuickAddOut(BaseModel):
 
 class AskIn(BaseModel):
     question: str = Field(min_length=1, max_length=300)
+    thread_id: Optional[int] = None  # None = start a new chat thread
 
 
 class AskOut(BaseModel):
@@ -159,6 +160,26 @@ class AskOut(BaseModel):
     category: Optional[str] = None
     transaction_type: Optional[str] = None
     range: str
+    thread_id: Optional[int] = None
+    duration_sec: Optional[float] = None
+
+
+class ChatThreadOut(BaseModel):
+    id: int
+    title: str
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ChatMessageOut(BaseModel):
+    id: int
+    question: str
+    answer: str
+    duration_sec: Optional[float] = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
 
 
 class BudgetIn(BaseModel):
