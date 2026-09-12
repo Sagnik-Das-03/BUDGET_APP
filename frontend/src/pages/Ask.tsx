@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
-import { Loader2, Plus, Send, ThumbsDown, ThumbsUp, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Loader2, Plus, Send, ThumbsDown, ThumbsUp, X } from 'lucide-react';
 import { api } from '../lib/api';
 import type { AskRow, ChatMessage } from '../lib/types';
 import { fmtMoney } from '../lib/format';
@@ -8,6 +8,64 @@ import { useElapsedSeconds } from '../lib/useElapsedSeconds';
 import { ModelBadge } from '../components/ModelBadge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+
+const ROW_PAGE_SIZE_OPTIONS = [10, 25, 50];
+
+// The backend always sends every matching transaction, not a capped preview -
+// this is the answer's actual evidence, so pagination here is purely a
+// display convenience over the full set, never a truncation of it.
+function AskRowsPanel({ rows }: { rows: AskRow[] }) {
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const paged = rows.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+
+  return (
+    <details className="mt-2" onToggle={() => setPage(1)}>
+      <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">
+        {rows.length} matching transaction{rows.length !== 1 ? 's' : ''} found (evidence)
+      </summary>
+      <div className="mt-1.5 rounded-md border bg-background p-2">
+        <div className="flex flex-col gap-1">
+          {paged.map((r, ri) => (
+            <div key={ri} className="flex items-center justify-between gap-2 text-xs">
+              <span className="text-muted-foreground">{r.date}</span>
+              <span className="flex-1 truncate">{r.description}</span>
+              <span className="text-muted-foreground">{r.category}</span>
+              <span className="tabular-nums">{fmtMoney(r.amount)}</span>
+            </div>
+          ))}
+        </div>
+        {rows.length > ROW_PAGE_SIZE_OPTIONS[0] && (
+          <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t pt-2 text-xs text-muted-foreground">
+            <div className="flex items-center gap-1.5">
+              <span>
+                {(currentPage - 1) * pageSize + 1}–{Math.min(currentPage * pageSize, rows.length)} of {rows.length}
+              </span>
+              <Select value={String(pageSize)} onValueChange={(v) => { setPageSize(Number(v)); setPage(1); }}>
+                <SelectTrigger size="sm" className="h-6 w-[84px] text-xs"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {ROW_PAGE_SIZE_OPTIONS.map((n) => <SelectItem key={n} value={String(n)}>{n} / page</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex items-center gap-1">
+              <Button variant="outline" size="sm" className="h-6 px-1.5" disabled={currentPage <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
+                <ChevronLeft className="size-3" />
+              </Button>
+              <span>Page {currentPage} of {totalPages}</span>
+              <Button variant="outline" size="sm" className="h-6 px-1.5" disabled={currentPage >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>
+                <ChevronRight className="size-3" />
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
+    </details>
+  );
+}
 
 interface Exchange {
   id: number;
@@ -231,23 +289,7 @@ export function Ask() {
                 <div className="mt-1 text-xs text-muted-foreground">Answered in {h.durationSec.toFixed(1)}s</div>
               )}
 
-              {!!h.rows?.length && (
-                <details className="mt-2">
-                  <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">
-                    {h.rows.length} matching transaction{h.rows.length !== 1 ? 's' : ''} found
-                  </summary>
-                  <div className="mt-1.5 flex flex-col gap-1 rounded-md border bg-background p-2">
-                    {h.rows.map((r, ri) => (
-                      <div key={ri} className="flex items-center justify-between gap-2 text-xs">
-                        <span className="text-muted-foreground">{r.date}</span>
-                        <span className="flex-1 truncate">{r.description}</span>
-                        <span className="text-muted-foreground">{r.category}</span>
-                        <span className="tabular-nums">{fmtMoney(r.amount)}</span>
-                      </div>
-                    ))}
-                  </div>
-                </details>
-              )}
+              {!!h.rows?.length && <AskRowsPanel rows={h.rows} />}
 
               <div className="mt-1.5 flex items-center gap-1">
                 <button

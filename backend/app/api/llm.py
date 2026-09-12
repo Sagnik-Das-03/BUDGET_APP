@@ -821,16 +821,19 @@ def ask(payload: AskIn, session: Session = Depends(get_session)):
     message = chat.add_message(thread.id, question, answer, duration_sec, query_json)
     session.commit()
 
-    # The actual matching rows behind the answer (capped, most recent first -
-    # `rows` is already ordered that way) so you can see exactly what was
-    # found rather than only trusting the phrased sentence.
+    # The actual matching rows behind the answer, IN FULL (never capped here -
+    # the whole point is that this is the real evidence for the answer, and a
+    # silently-truncated "evidence" list would be its own kind of inaccuracy).
+    # `rows` is already ordered most-recent-first. A large result set is the
+    # frontend's problem to paginate for display, not a reason to send less
+    # than everything that was actually matched.
     row_outs = [
         AskRowOut(
             date=r.date, description=r.description, amount=r.amount,
             transaction_type=r.transaction_type.value if hasattr(r.transaction_type, "value") else r.transaction_type,
             category=r.category.name,
         )
-        for r in rows[:10]
+        for r in rows
     ]
 
     if aggregation == "breakdown":
