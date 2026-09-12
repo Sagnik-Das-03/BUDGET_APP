@@ -29,17 +29,17 @@ flowchart LR
     subgraph Backend["FastAPI backend — one process, :8000"]
         API["REST/JSON API<br/>(app/api/*)"]
         CALC["dashboard/calculations.py<br/>every number shown anywhere"]
-        LLMR["LLM router<br/>(app/llm)"]
+        LLMR["LLM router<br/>(app/llm)<br/>on-demand load + status"]
         SYNC["sync engine + scheduler<br/>(app/sync)"]
     end
 
-    DB[("SQLite<br/>source of truth")]
+    DB[("SQLite<br/>source of truth<br/>+ chat history")]
     SHEETS[("Google Sheets<br/>human-editable mirror")]
     MODELS[["Local models<br/>Qwen3 0.6B / 4B-int4<br/>via LiteRT-LM"]]
 
     FE <-->|HTTP JSON| API
     API --> CALC
-    API --> LLMR
+    API -->|"1. extract query (JSON)<br/>2. Python computes exact answer<br/>3. phrase in words"| LLMR
     API <--> DB
     CALC --> DB
     LLMR --> MODELS
@@ -53,7 +53,23 @@ Sheets in both directions. The LLM router loads each local model once and
 routes each AI feature (autocomplete, categorize, quick-add, the Dashboard's
 AI-generated explanation, anomaly detection's summary, "ask your budget") to
 whichever model is configured for it - a small model for per-keystroke tasks,
-a larger one for anything that can afford to be slower.
+a larger one for anything that can afford to be slower. A model loads lazily
+on first use unless it's in the small eagerly-loaded set (autocomplete/
+categorize, warmed at startup); the Ask page instead calls `/api/llm/
+model_status` and `/api/llm/warmup` itself the moment it opens, so it can show
+an explicit "loading the model" state up front rather than the first real
+question silently taking up to a minute.
+
+"Ask your budget" never lets the model do arithmetic: a grammar-constrained
+JSON call turns the question into a structured query (categories, an optional
+keyword search against transaction descriptions, a date range, and an
+aggregation - sum/count/avg/or a category breakdown), Python computes the
+exact answer against `Transaction` directly, and only then does a second,
+short LLM call phrase that already-computed number into a sentence. Each
+question and its answer are saved as a `ChatMessage` under a `ChatThread` (the
+Ask page's tabs), so history survives a reload; a thread also includes its
+last few exchanges in the next question's prompt, so follow-ups like "what
+about last month?" resolve correctly.
 
 ## Data model
 
