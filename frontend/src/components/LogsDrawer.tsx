@@ -3,11 +3,13 @@ import { useState } from 'react';
 import { ChevronLeft, ChevronRight, ScrollText } from 'lucide-react';
 import { api } from '../lib/api';
 import { useLocalStorage } from '../lib/useLocalStorage';
+import { useResizableWidth } from '../lib/useResizableWidth';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetTrigger } from '@/components/ui/sheet';
+import { ResizeHandle } from '@/components/ui/resize-handle';
 
 const LEVEL_VARIANT: Record<string, 'secondary' | 'destructive' | 'outline'> = {
   info: 'secondary', warn: 'outline', error: 'destructive',
@@ -20,10 +22,13 @@ const PAGE_SIZE_OPTIONS = [25, 50, 100];
 // so the 15s polling interval starts/stops with it automatically rather
 // than running in the background when nobody's looking at it.
 export function LogsDrawer({ trigger }: { trigger: React.ReactNode }) {
+  const { width, onDragStart } = useResizableWidth('budget_tracker.logsDrawerWidth', 576);
+
   return (
     <Sheet>
       <SheetTrigger asChild>{trigger}</SheetTrigger>
-      <SheetContent side="right" className="flex w-full flex-col sm:max-w-xl">
+      <SheetContent side="right" className="relative flex flex-col" style={{ width, maxWidth: '95vw' }}>
+        <ResizeHandle onMouseDown={onDragStart} />
         <SheetHeader>
           <SheetTitle className="flex items-center gap-2">
             <ScrollText className="size-4" /> Sync Logs

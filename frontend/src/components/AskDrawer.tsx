@@ -5,11 +5,13 @@ import { api } from '../lib/api';
 import type { AskRow, ChatMessage } from '../lib/types';
 import { fmtMoney } from '../lib/format';
 import { useElapsedSeconds } from '../lib/useElapsedSeconds';
+import { useResizableWidth } from '../lib/useResizableWidth';
 import { ModelBadge } from './ModelBadge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetTrigger } from '@/components/ui/sheet';
+import { ResizeHandle } from '@/components/ui/resize-handle';
 
 const ROW_PAGE_SIZE_OPTIONS = [10, 25, 50];
 
@@ -226,10 +228,13 @@ export function AskDrawer({ trigger }: { trigger: React.ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [threads.data, activeId]);
 
+  const { width, onDragStart } = useResizableWidth('budget_tracker.askDrawerWidth', 576);
+
   return (
     <Sheet>
       <SheetTrigger asChild>{trigger}</SheetTrigger>
-      <SheetContent side="right" className="flex w-full flex-col sm:max-w-xl">
+      <SheetContent side="right" className="relative flex flex-col" style={{ width, maxWidth: '95vw' }}>
+        <ResizeHandle onMouseDown={onDragStart} />
         <SheetHeader>
           <SheetTitle className="flex items-center gap-2">
             Ask Your Budget
@@ -376,8 +381,13 @@ export function AskDrawer({ trigger }: { trigger: React.ReactNode }) {
               </div>
             ))}
             {ask.isPending && (
-              <div className="self-start rounded-lg bg-muted px-3.5 py-2 text-sm text-muted-foreground">
-                Thinking… {elapsed}s elapsed.
+              <div className="flex flex-col gap-1.5">
+                <div className="self-end max-w-[85%] rounded-lg bg-primary px-3.5 py-2 text-sm text-primary-foreground">
+                  {ask.variables}
+                </div>
+                <div className="self-start rounded-lg bg-muted px-3.5 py-2 text-sm text-muted-foreground">
+                  Thinking… {elapsed}s elapsed.
+                </div>
               </div>
             )}
           </div>
