@@ -89,6 +89,17 @@ class GoogleSheetsService:
                 return s.sheet_id
         return self.create_sheet(spreadsheet_id, title)
 
+    def delete_sheet(self, spreadsheet_id: str, sheet_id: int) -> None:
+        """Permanently removes one tab - used when a saved view backing a
+        generated tab (see app/sync/reports.py) is itself deleted, so its
+        tab doesn't linger orphaned in the spreadsheet. A spreadsheet must
+        keep at least one sheet - deleting the last one is a real API error,
+        left to the caller to avoid (shouldn't happen here: Transactions
+        always exists alongside any saved-view tab)."""
+        body = {"requests": [{"deleteSheet": {"sheetId": sheet_id}}]}
+        with_retry(lambda: self._sheets.spreadsheets().batchUpdate(
+            spreadsheetId=spreadsheet_id, body=body).execute())
+
     def reorder_sheets(self, spreadsheet_id: str, sheet_ids_in_order: list[int]) -> None:
         """Moves tabs to match sheet_ids_in_order (left to right). Setting
         each sheet's `index` to its position in this list, in ascending

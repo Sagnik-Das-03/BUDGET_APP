@@ -183,6 +183,10 @@ class SavedView(Base):
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     filters: Mapped[str] = mapped_column(Text, nullable=False)  # JSON-encoded ViewFilters
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    # The Sheets tab (named after this view) that mirrors it - see
+    # app/sync/reports.py's regenerate_saved_view_tab. None until the first
+    # successful sync, same pattern as MonthlyPeriod.sheet_gid above.
+    sheet_gid: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
 
 class ChatThread(Base):

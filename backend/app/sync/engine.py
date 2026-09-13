@@ -4,9 +4,10 @@ hitting a quota error) never rolls back an already-successful pull or push - the
 whole point of spec section 21 ("must not lose user data on API failure")."""
 import logging
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import LogLevel
+from app.models import LogLevel, SavedView
 from app.repositories.accounts import AccountRepository
 from app.repositories.categories import CategoryRepository
 from app.repositories.sync import SyncRepository
@@ -248,12 +249,17 @@ def run_sync_cycle(session: Session, sheets: GoogleSheetsService, spreadsheet_id
     # this cycle could plausibly have changed what a report would show.
     pull_counts = summary.get("pull") or {}
     push_counts = summary.get("push") or {}
+    # A saved view created since its last (or first-ever) sync has no tab
+    # yet - cheap to check, and self-correcting: once regenerate_all() sets
+    # its sheet_gid, this stops being true for it.
+    unsynced_view_exists = session.scalar(select(SavedView.id).where(SavedView.sheet_gid.is_(None)).limit(1)) is not None
     data_changed = (
         pull_counts.get("created", 0) > 0
         or pull_counts.get("updated", 0) > 0
         or pull_counts.get("conflict", 0) > 0
         or push_counts.get("pushed", 0) > 0
         or bool(summary["periods_discovered"])
+        or unsynced_view_exists
     )
     if data_changed:
         try:

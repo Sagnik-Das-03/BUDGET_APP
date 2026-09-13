@@ -3,18 +3,22 @@ Summary, Dashboard) from the current DB state - human-readable formatting + nati
 charts, reusing the validated color palette from the earlier xlsx dashboard work.
 Called at the end of every sync cycle that actually changed something, so these
 views can never drift from the canonical Transactions tab."""
+import json
 import time
 from datetime import date as date_type
+from typing import Optional
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.dashboard import calculations as calc
-from app.models import MonthlyPeriod
+from app.models import MonthlyPeriod, SavedView, Transaction, TransactionType
+from app.repositories.accounts import AccountRepository
+from app.repositories.categories import CategoryRepository
 from app.repositories.transactions import TransactionRepository
 from app.sheets import formatting, mapping
 from app.sheets.adapter import GoogleSheetsService
-from app.utils import period_key_for
+from app.utils import period_key_for, week_key_for, year_key_for
 
 # Kept in sync by hand with app/api/appearance.py's DEFAULT_PALETTE - this is
 # the fixed fallback baked into the Sheets-side generated native charts, which
@@ -277,6 +281,74 @@ def regenerate_yearly_summary(session: Session, sheets: GoogleSheetsService, spr
     _rewrite_tab(sheets, spreadsheet_id, "Yearly Summary", grid, header_rows0, currency_ranges, chart_specs)
 
 
+def _saved_view_transactions(session: Session, filters: dict) -> list[Transaction]:
+    """Every non-deleted transaction matching a saved view's filter, across
+    ALL time - the view's own year/month scoping (if it has one) is
+    deliberately ignored here, since the whole point of this tab is the
+    multi-period trend for that filter, not one single period."""
+    category_ids = None
+    if filters.get("category"):
+        cat_repo = CategoryRepository(session)
+        category_ids = [c.id for c in (cat_repo.get_by_name(n) for n in filters["category"]) if c]
+    account_ids = None
+    if filters.get("account"):
+        acct_repo = AccountRepository(session)
+        account_ids = [a.id for a in (acct_repo.get_by_name(n) for n in filters["account"]) if a]
+    return TransactionRepository(session).filter(
+        category_ids=category_ids, category_exclude=bool(filters.get("categoryExclude")),
+        account_ids=account_ids, account_exclude=bool(filters.get("accountExclude")),
+        transaction_type=filters.get("type") or None,
+        search=filters.get("search") or None,
+    )
+
+
+def _bucket_totals(txns: list[Transaction], key_fn) -> dict[str, dict[str, float]]:
+    buckets: dict[str, dict[str, float]] = {}
+    for t in txns:
+        bucket = buckets.setdefault(key_fn(t.date), {"income": 0.0, "expenses": 0.0})
+        if t.transaction_type == TransactionType.income:
+            bucket["income"] += t.amount
+        else:
+            bucket["expenses"] += t.amount
+    return buckets
+
+
+def regenerate_saved_view_tab(session: Session, sheets: GoogleSheetsService, spreadsheet_id: str,
+                               view: SavedView) -> int:
+    """One tab per saved view (e.g. "Personal Expenses"), named after it -
+    Monthly/Yearly/Weekly breakdowns of whatever matches that view's filter.
+    Reports plain Income/Expenses/Net per bucket rather than the fuller SIP/
+    cash-savings split the whole-dataset monthly tabs use - a filtered
+    subset (e.g. one category) doesn't cleanly map onto that breakdown."""
+    filters = json.loads(view.filters)
+    txns = _saved_view_transactions(session, filters)
+    monthly = _bucket_totals(txns, period_key_for)
+    yearly = _bucket_totals(txns, year_key_for)
+    weekly = _bucket_totals(txns, week_key_for)
+
+    grid: list[list] = [[view.name], [NOTE], []]
+    header_rows0: list[tuple[int, int]] = []
+    currency_ranges: list[tuple[int, int, int, int]] = []
+
+    def _add_section(title: str, buckets: dict[str, dict[str, float]], limit: Optional[int] = None) -> None:
+        grid.append([title])
+        header_rows0.append((len(grid), 4))
+        grid.append(["Period", "Income", "Expenses", "Net"])
+        data_start0 = len(grid)
+        keys = sorted(buckets)[-limit:] if limit else sorted(buckets)
+        for key in keys:
+            b = buckets[key]
+            grid.append([key, round(b["income"], 2), round(b["expenses"], 2), round(b["income"] - b["expenses"], 2)])
+        currency_ranges.append((data_start0, len(grid), 1, 4))
+        grid.append([])
+
+    _add_section("Monthly", monthly)
+    _add_section("Yearly", yearly)
+    _add_section("Weekly (last 26)", weekly, limit=26)
+
+    return _rewrite_tab(sheets, spreadsheet_id, view.name, grid, header_rows0, currency_ranges, [])
+
+
 def regenerate_all(session: Session, sheets: GoogleSheetsService, spreadsheet_id: str) -> dict:
     regenerate_dashboard(session, sheets, spreadsheet_id)
     periods = list(session.scalars(select(MonthlyPeriod).order_by(MonthlyPeriod.period_key)))
@@ -285,4 +357,14 @@ def regenerate_all(session: Session, sheets: GoogleSheetsService, spreadsheet_id
     regenerate_monthly_breakdown(session, sheets, spreadsheet_id)
     regenerate_weekly_summary(session, sheets, spreadsheet_id)
     regenerate_yearly_summary(session, sheets, spreadsheet_id)
-    return {"dashboard": True, "months": len(periods), "monthly_breakdown": True, "weekly": True, "yearly": True}
+
+    views = list(session.scalars(select(SavedView)))
+    for view in views:
+        gid = regenerate_saved_view_tab(session, sheets, spreadsheet_id, view)
+        if view.sheet_gid != gid:
+            view.sheet_gid = gid
+
+    return {
+        "dashboard": True, "months": len(periods), "monthly_breakdown": True, "weekly": True, "yearly": True,
+        "saved_views": len(views),
+    }
