@@ -9,6 +9,7 @@ from app.demo_data import seed_demo_data
 from app.models import Transaction
 from app.repositories.accounts import AccountRepository
 from app.repositories.categories import CategoryRepository
+from app.sync.scheduler import publish_viewer_manifest
 from app.user_registry import ADMIN_USERNAME, registry
 
 router = APIRouter(prefix="/api/users", tags=["users"])
@@ -135,6 +136,7 @@ def create_user(payload: CreateUserIn):
             raise
 
     registry.add_user(payload.username, db_file, payload.password)
+    publish_viewer_manifest()
     return UserOut(
         username=payload.username, is_active=registry.get_active() == payload.username,
         db_size_bytes=db_file_size(db_file), has_password=True,
@@ -200,4 +202,5 @@ def delete_user(username: str, admin_password: Optional[str] = Body(default=None
     # becoming an orphaned file with no registry entry pointing at it.
     delete_db_file(db_file)
     registry.remove_user(username)
+    publish_viewer_manifest()
     return {"deleted": True}

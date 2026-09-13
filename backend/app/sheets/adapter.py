@@ -1,6 +1,7 @@
 """All Google Sheets/Drive API calls live here and ONLY here (spec section 25).
 The rest of the app talks to GoogleSheetsService, never to googleapiclient directly.
 """
+import threading
 import time
 from dataclasses import dataclass
 from typing import Optional, Any, Callable, TypeVar
@@ -16,10 +17,35 @@ SCOPES = [
 
 T = TypeVar("T")
 
+# Shared across every caller in the process - the desktop sync scheduler AND
+# (once several Android viewers are each refreshed on their own timer) the
+# Android host's periodic pulls, all funnel through with_retry() below, so
+# one sliding-window limiter here caps total API traffic regardless of how
+# many independent loops are calling in. Well under Google's default quota
+# (300 read requests/min/project) even with multiple viewers refreshing.
+_MAX_CALLS_PER_MINUTE = 60
+_call_times: list[float] = []
+_rate_lock = threading.Lock()
+
+
+def _rate_limit() -> None:
+    with _rate_lock:
+        now = time.monotonic()
+        while _call_times and now - _call_times[0] > 60:
+            _call_times.pop(0)
+        if len(_call_times) >= _MAX_CALLS_PER_MINUTE:
+            wait = 60 - (now - _call_times[0])
+            if wait > 0:
+                time.sleep(wait)
+        _call_times.append(time.monotonic())
+
 
 def with_retry(fn: Callable[[], T], *, retries: int = 4, base_delay: float = 1.5,
                on_retry: Optional[Callable[[int, Exception], None]] = None) -> T:
-    """Exponential backoff for transient API/network failures (spec section 21)."""
+    """Exponential backoff for transient API/network failures (spec section 21).
+    Every GoogleSheetsService method routes its actual API call through here,
+    so the rate limit above applies uniformly without wrapping each method."""
+    _rate_limit()
     last_exc: Optional[Exception] = None
     for attempt in range(retries + 1):
         try:

@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
+from app._pydantic_compat import model_to_dict
 from app.db import get_session
 from app.imports.csv_parser import CsvParseError, ParseResult, parse_csv
 from app.llm.router import llm_router
@@ -133,7 +134,9 @@ def _stream_preview(result: ParseResult, session: Session):
             is_duplicate=bool(dupes), duplicate_of=dupes[0].transaction_id if dupes else None,
         ))
     preview = ImportPreviewOut(rows=out_rows, skipped_rows=result.skipped_rows, detected_columns=result.detected_columns)
-    yield json.dumps({"type": "done", **preview.model_dump(mode="json")}) + "\n"
+    # default=str (not pydantic's mode="json", which v1 doesn't support)
+    # handles the date fields inside `rows` under either pydantic version.
+    yield json.dumps({"type": "done", **model_to_dict(preview)}, default=str) + "\n"
 
 
 @router.post("/csv/preview")

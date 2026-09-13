@@ -1,7 +1,9 @@
 from datetime import date as date_type, datetime
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 from typing import Optional
+
+from app._pydantic_compat import FromAttributes, field_validator, list_field
 
 
 class CategoryIn(BaseModel):
@@ -9,7 +11,7 @@ class CategoryIn(BaseModel):
     color_hex: str = "#898781"
 
 
-class CategoryOut(BaseModel):
+class CategoryOut(FromAttributes):
     id: int
     name: str
     color_hex: str
@@ -17,21 +19,17 @@ class CategoryOut(BaseModel):
     counts_as_expense: bool
     is_essential: bool
 
-    model_config = {"from_attributes": True}
-
 
 class AccountIn(BaseModel):
     name: str = Field(min_length=1, max_length=64)
     account_type: str = "General"
 
 
-class AccountOut(BaseModel):
+class AccountOut(FromAttributes):
     id: int
     name: str
     account_type: str
     is_active: bool
-
-    model_config = {"from_attributes": True}
 
 
 class TransactionIn(BaseModel):
@@ -58,7 +56,7 @@ class TransactionIn(BaseModel):
         return v
 
 
-class TransactionOut(BaseModel):
+class TransactionOut(FromAttributes):
     transaction_id: str
     date: date_type
     description: str
@@ -73,8 +71,6 @@ class TransactionOut(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    model_config = {"from_attributes": True}
-
 
 class TransactionTrashOut(TransactionOut):
     deleted_at: datetime
@@ -82,7 +78,7 @@ class TransactionTrashOut(TransactionOut):
 
 
 class BulkCreateIn(BaseModel):
-    transactions: list[TransactionIn] = Field(min_length=1, max_length=200)
+    transactions: list[TransactionIn] = list_field(min_len=1, max_len=200)
 
 
 class AutocompleteIn(BaseModel):
@@ -183,23 +179,19 @@ class AskOut(BaseModel):
     confidence_reasons: list[str] = []
 
 
-class ChatThreadOut(BaseModel):
+class ChatThreadOut(FromAttributes):
     id: int
     title: str
     updated_at: datetime
 
-    model_config = {"from_attributes": True}
 
-
-class ChatMessageOut(BaseModel):
+class ChatMessageOut(FromAttributes):
     id: int
     question: str
     answer: str
     duration_sec: Optional[float] = None
     feedback: Optional[str] = None
     created_at: datetime
-
-    model_config = {"from_attributes": True}
 
 
 class ChatFeedbackIn(BaseModel):
@@ -241,7 +233,7 @@ class SheetRowValidationError(BaseModel):
 
 
 class BulkDeleteIn(BaseModel):
-    transaction_ids: list[str] = Field(min_length=1)
+    transaction_ids: list[str] = list_field(min_len=1)
 
 
 class ImportRowOut(BaseModel):

@@ -5,8 +5,16 @@
 # to create one.
 /src/main/python/dashboard_credentials.json
 
-# The LAN password's salted hash and the local SQLite mirror of Sheets data
-# (see android_dashboard/auth.py and local_db.py) - both per-install state,
-# neither should be committed.
+# Per-install state - the LAN password's salted hash (auth_glue.py), the
+# local mirror of the viewer manifest (viewers.py), and every viewer's own
+# SQLite file (the real app/db.py's per-user-file convention, reused here
+# per-viewer) plus the registry it bootstraps by default. None of this is
+# source - it's all rebuilt automatically from the manifest sheet.
 /src/main/python/auth_config.json
-/src/main/python/dashboard_cache.db
+/src/main/python/viewers.json
+/src/main/python/data/
+
+# A generated copy of backend/app/ (this repo's real backend), regenerated
+# by sync_app.bat before every build - never hand-edited here, and never
+# committed, so there's exactly one copy of the source to ever go stale.
+/src/main/python/app/

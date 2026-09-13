@@ -4,7 +4,7 @@ REM Same double-click-vs-typed-in-a-terminal handling as run.bat - see the
 REM comment there for why this is needed at all.
 echo %cmdcmdline% | find /i "/c" >nul
 if not errorlevel 1 (
-    start "Sync Android Dashboard" cmd /k "%~f0"
+    start "Sync Android App" cmd /k "%~f0"
     exit /b
 )
 
@@ -12,17 +12,16 @@ setlocal
 cd /d "%~dp0"
 
 echo ============================================
-echo  Budget Dashboard (Android) - sync frontend
+echo  Budget Tracker (Android) - sync frontend + backend
 echo ============================================
 echo.
-echo There is only ONE frontend build - this builds it and copies the same
-echo output into the Android app's two static/ folders. Build the APK
-echo yourself from Android Studio afterwards. See "Viewing your dashboard
-echo from your phone" in README.md for the full picture (useCapabilities()
-echo is what makes one build work for both apps).
+echo There is only ONE frontend and ONE backend - this builds the frontend
+echo and copies both it and backend\app\ into the Android app, which hosts
+echo the real app read-only (see android\app\src\main\python\server.py).
+echo Build the APK yourself from Android Studio afterwards.
 echo.
 
-echo [1/2] Building frontend...
+echo [1/3] Building frontend...
 cd frontend
 call npm run build
 if errorlevel 1 (
@@ -35,18 +34,22 @@ if errorlevel 1 (
 cd ..
 
 echo.
-echo [2/2] Syncing frontend\dist into the Android app...
-robocopy frontend\dist android_dashboard\static /MIR /NFL /NDL /NJH >nul
-if errorlevel 8 (
-    echo.
-    echo ERROR: Failed to copy frontend\dist into android_dashboard\static.
-    pause
-    exit /b 1
-)
+echo [2/3] Syncing frontend\dist into the Android app...
 robocopy frontend\dist android\app\src\main\python\static /MIR /NFL /NDL /NJH >nul
 if errorlevel 8 (
     echo.
-    echo ERROR: Failed to copy frontend\dist into android\app\src\main\python\static.
+    echo ERROR: Failed to copy frontend\dist into the Android app.
+    pause
+    exit /b 1
+)
+echo Done.
+
+echo.
+echo [3/3] Syncing backend\app into the Android app...
+robocopy backend\app android\app\src\main\python\app /MIR /XF cli.py /XD __pycache__ /NFL /NDL /NJH >nul
+if errorlevel 8 (
+    echo.
+    echo ERROR: Failed to copy backend\app into the Android app.
     pause
     exit /b 1
 )

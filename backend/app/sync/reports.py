@@ -20,6 +20,7 @@ from app.repositories.savings_goal import SavingsGoalRepository
 from app.repositories.transactions import TransactionRepository
 from app.sheets import formatting, mapping
 from app.sheets.adapter import GoogleSheetsService
+from app.user_registry import ADMIN_USERNAME, registry
 from app.utils import period_key_for, week_key_for, year_key_for
 
 # Kept in sync by hand with app/api/appearance.py's DEFAULT_PALETTE - this is
@@ -391,6 +392,29 @@ def regenerate_config_tab(session: Session, sheets: GoogleSheetsService, spreads
     currency_ranges.append((goals_start0, len(grid), 1, 2))
 
     _rewrite_tab(sheets, spreadsheet_id, "Config", grid, header_rows0, currency_ranges, [])
+
+
+def regenerate_viewer_manifest(sheets: GoogleSheetsService, manifest_spreadsheet_id: str) -> None:
+    """Publishes every onboarded user's name + spreadsheet_id to a dedicated
+    tab in a SEPARATE spreadsheet (settings.viewer_manifest_spreadsheet_id) -
+    the only way the Android read-only host learns which viewers exist (see
+    android/app/src/main/python/viewers.py's refresh_manifest()); the phone
+    has no "add viewer" UI of its own, onboarding a person only ever happens
+    here on desktop. Excludes the admin profile (no financial data of its
+    own, nothing to view) and anyone without a spreadsheet_id set yet
+    (nothing to pull). Takes no `session`/user-database `spreadsheet_id` -
+    this reads the registry (all users), not one user's own database."""
+    grid: list[list] = []
+    header_rows0 = [(len(grid), 2)]
+    grid.append(["Name", "Spreadsheet ID"])
+    for u in registry.list_users():
+        if u["username"] == ADMIN_USERNAME:
+            continue
+        spreadsheet_id = u.get("spreadsheet_id")
+        if not spreadsheet_id:
+            continue
+        grid.append([u["username"], spreadsheet_id])
+    _rewrite_tab(sheets, manifest_spreadsheet_id, "Viewers", grid, header_rows0, [], [])
 
 
 def regenerate_all(session: Session, sheets: GoogleSheetsService, spreadsheet_id: str) -> dict:

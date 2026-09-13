@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from typing import Optional
 
+from app._pydantic_compat import model_to_dict
 from app.db import get_session
 from app.repositories.app_settings import AppSettingRepository
 
@@ -47,7 +48,7 @@ def get_palette(session: Session = Depends(get_session)):
 @router.put("/palette")
 def set_palette(payload: PaletteIn, session: Session = Depends(get_session)):
     repo = AppSettingRepository(session)
-    for name, value in payload.model_dump(exclude_none=True).items():
+    for name, value in model_to_dict(payload, exclude_none=True).items():
         repo.set(PALETTE_SETTING_KEYS[name], value)
     session.commit()
     return _current_palette(session)

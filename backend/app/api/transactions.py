@@ -3,6 +3,7 @@ from datetime import date as date_type
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
+from app._pydantic_compat import model_to_dict
 from app.db import get_session
 from app.models import Account, Category, SyncStatus, Transaction, TransactionType
 from app.repositories.accounts import AccountRepository
@@ -44,7 +45,7 @@ def _to_out(txn: Transaction) -> TransactionOut:
 def _to_trash_out(txn: Transaction) -> TransactionTrashOut:
     can_permanently_delete = txn.last_synced_at is None or txn.sync_status == SyncStatus.synced
     return TransactionTrashOut(
-        **_to_out(txn).model_dump(),
+        **model_to_dict(_to_out(txn)),
         deleted_at=txn.deleted_at,
         can_permanently_delete=can_permanently_delete,
     )

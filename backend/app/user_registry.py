@@ -131,6 +131,24 @@ class UserRegistry:
             data["active"] = username
         self._save(data)
 
+    def set_spreadsheet_id(self, username: str, spreadsheet_id: str) -> None:
+        """Denormalized copy of this user's spreadsheet id - the real source
+        of truth is their own app_settings row (see app/sync/scheduler.py's
+        set_spreadsheet_id(), which calls this too), kept here so listing
+        every user's spreadsheet (app/sync/reports.py's
+        regenerate_viewer_manifest) never has to open each user's own
+        database just to read one setting."""
+        data = self._load()
+        for u in data["users"]:
+            if u["username"] == username:
+                if spreadsheet_id:
+                    u["spreadsheet_id"] = spreadsheet_id
+                else:
+                    u.pop("spreadsheet_id", None)
+                self._save(data)
+                return
+        raise ValueError(f"User {username!r} not found")
+
     def set_active(self, username: str) -> None:
         data = self._load()
         if not any(u["username"] == username for u in data["users"]):

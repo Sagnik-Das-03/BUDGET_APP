@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -35,6 +36,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -55,7 +57,7 @@ class MainActivity : FragmentActivity() {
     // shouldn't land straight back on this screen unlocked.
     private val unlocked = mutableStateOf(false)
 
-    // The LAN password (see android_dashboard/auth.py) is separate from the
+    // The LAN password (see auth_glue.py) is separate from the
     // biometric lock above: the biometric lock guards this control screen on
     // the phone itself, the LAN password guards the actual HTTP server every
     // other device on the Wi-Fi talks to. Server.py's middleware fails
@@ -207,6 +209,12 @@ class MainActivity : FragmentActivity() {
                     onValueChange = { password = it; error = null },
                     label = { Text("New password") },
                     visualTransformation = PasswordVisualTransformation(),
+                    // Without this, the keyboard doesn't know it's a password
+                    // field and can silently auto-capitalize/autocorrect what
+                    // you type - the saved password then no longer matches
+                    // what you type back into the browser's login prompt.
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(modifier = Modifier.height(8.dp))
@@ -215,6 +223,8 @@ class MainActivity : FragmentActivity() {
                     onValueChange = { confirm = it; error = null },
                     label = { Text("Confirm password") },
                     visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 error?.let {
@@ -244,15 +254,19 @@ class MainActivity : FragmentActivity() {
     }
 
     @Composable
-    fun ManageViewersSection() {
-        var usersJson by remember { mutableStateOf(loadUsersJsonPy()) }
-        var name by remember { mutableStateOf("") }
-        var spreadsheetId by remember { mutableStateOf("") }
+    fun ViewersSection() {
+        // Read-only by design: onboarding a person (picking a name, linking
+        // their spreadsheet) only ever happens on the desktop app, which
+        // publishes the list this reads (see backend/app/sync/reports.py's
+        // regenerate_viewer_manifest) - there is deliberately no add/remove
+        // here, just "look" and "switch which one I'm looking at".
+        var viewersJson by remember { mutableStateOf(listViewersPy()) }
         var error by remember { mutableStateOf<String?>(null) }
+        var active by remember { mutableStateOf<String?>(null) }
 
-        val userNames = remember(usersJson) {
-            val arr = JSONArray(usersJson)
-            (0 until arr.length()).map { i -> arr.getJSONObject(i).getString("name") }
+        val viewerNames = remember(viewersJson) {
+            val arr = JSONArray(viewersJson)
+            (0 until arr.length()).map { i -> arr.getString(i) }
         }
 
         Card(modifier = Modifier.fillMaxWidth()) {
@@ -260,58 +274,43 @@ class MainActivity : FragmentActivity() {
                 Text("Viewers", style = MaterialTheme.typography.titleLarge)
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "Anyone listed here shows up in the dashboard's profile switcher, each with " +
-                        "its own isolated local cache. The same reader account needs Viewer access on " +
-                        "their spreadsheet first (see README.md).",
+                    text = "Published from the desktop app - onboarding a person happens there, not " +
+                        "here. Each gets its own isolated local cache, refreshed automatically.",
                     style = MaterialTheme.typography.bodySmall,
                 )
                 Spacer(modifier = Modifier.height(12.dp))
-                if (userNames.isEmpty()) {
-                    Text("No viewers yet.", style = MaterialTheme.typography.bodyMedium)
+                if (viewerNames.isEmpty()) {
+                    Text(
+                        "No viewers yet - start the server once to pull the list, or check that a " +
+                            "person has been onboarded on the desktop app.",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
                 } else {
-                    userNames.forEach { u ->
+                    viewerNames.forEach { name ->
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Text(u, style = MaterialTheme.typography.bodyLarge)
+                            Text(name, style = MaterialTheme.typography.bodyLarge)
                             TextButton(onClick = {
                                 try {
-                                    removeUserPy(u)
-                                    usersJson = loadUsersJsonPy()
+                                    activateViewerPy(name)
+                                    active = name
+                                    error = null
                                 } catch (e: PyException) {
-                                    error = e.message ?: "Couldn't remove $u"
+                                    error = e.message ?: "Couldn't switch to $name"
                                 }
-                            }) { Text("Remove") }
+                            }) { Text(if (active == name) "Viewing" else "View") }
                         }
                     }
                 }
-                Spacer(modifier = Modifier.height(12.dp))
-                OutlinedTextField(
-                    value = name, onValueChange = { name = it; error = null },
-                    label = { Text("Name") }, modifier = Modifier.fillMaxWidth(),
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = spreadsheetId, onValueChange = { spreadsheetId = it; error = null },
-                    label = { Text("Spreadsheet ID") }, modifier = Modifier.fillMaxWidth(),
-                )
                 error?.let {
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(it, color = MaterialTheme.colorScheme.error)
                 }
                 Spacer(modifier = Modifier.height(8.dp))
-                Button(onClick = {
-                    try {
-                        addUserPy(name, spreadsheetId)
-                        name = ""
-                        spreadsheetId = ""
-                        usersJson = loadUsersJsonPy()
-                    } catch (e: PyException) {
-                        error = e.message ?: "Couldn't add viewer"
-                    }
-                }) { Text("Add Viewer") }
+                TextButton(onClick = { viewersJson = listViewersPy() }) { Text("Refresh list") }
             }
         }
     }
@@ -480,7 +479,7 @@ class MainActivity : FragmentActivity() {
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                ManageViewersSection()
+                ViewersSection()
 
                 Spacer(modifier = Modifier.height(24.dp))
             }
@@ -491,21 +490,17 @@ class MainActivity : FragmentActivity() {
 private fun pyModule(name: String) = Python.getInstance().getModule(name)
 
 private fun isPasswordSetPy(): Boolean =
-    pyModule("android_dashboard.auth").callAttr("is_password_set").toBoolean()
+    pyModule("auth_glue").callAttr("is_password_set").toBoolean()
 
 private fun setPasswordPy(password: String) {
-    pyModule("android_dashboard.auth").callAttr("set_password", password)
+    pyModule("auth_glue").callAttr("set_password", password)
 }
 
-private fun loadUsersJsonPy(): String =
-    pyModule("android_dashboard.users_config").callAttr("load_users_json").toString()
+private fun listViewersPy(): String =
+    pyModule("viewers").callAttr("list_viewers_json").toString()
 
-private fun addUserPy(name: String, spreadsheetId: String) {
-    pyModule("android_dashboard.users_config").callAttr("add_user", name, spreadsheetId)
-}
-
-private fun removeUserPy(name: String) {
-    pyModule("android_dashboard.users_config").callAttr("remove_user", name)
+private fun activateViewerPy(name: String) {
+    pyModule("viewers").callAttr("activate_viewer", name)
 }
 
 private fun getLocalIpAddress(): String {

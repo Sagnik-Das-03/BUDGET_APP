@@ -1,12 +1,24 @@
+import os
 from pathlib import Path
 
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from app._pydantic_compat import PYDANTIC_V2, BaseSettings, SettingsConfigDict
 
-BASE_DIR = Path(__file__).resolve().parent.parent
+# Overridable so the Android host (see android/app/src/main/python/server.py)
+# can point this at Chaquopy's app-private storage instead of a sibling of
+# this file, which doesn't exist as a writable location on Android. Not read
+# anywhere by desktop/Docker, which never sets this env var.
+BASE_DIR = Path(os.environ["BUDGET_TRACKER_HOME"]) if os.environ.get("BUDGET_TRACKER_HOME") \
+    else Path(__file__).resolve().parent.parent
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=BASE_DIR / ".env", env_file_encoding="utf-8", extra="ignore")
+    if PYDANTIC_V2:
+        model_config = SettingsConfigDict(env_file=BASE_DIR / ".env", env_file_encoding="utf-8", extra="ignore")
+    else:
+        class Config:
+            env_file = str(BASE_DIR / ".env")
+            env_file_encoding = "utf-8"
+            extra = "ignore"
 
     # Shared fallback only - a user with no service account key of their own
     # (Settings -> Google Sheets sync -> upload credentials) uses this one.
@@ -34,6 +46,16 @@ class Settings(BaseSettings):
     # on CPU and that model then stays on CPU for the rest of the process,
     # rather than silently staying broken or paying the failure cost twice.
     llm_backend: str = "cpu"
+    # Set by the Android host only (server.py) - see app/main.py's
+    # read-only middleware. Never set on desktop/Docker, where it stays
+    # False and that middleware is a no-op.
+    read_only_mode: bool = False
+    # A separate, dedicated spreadsheet (not any single user's own) that
+    # regenerate_viewer_manifest() publishes {username, spreadsheet_id} rows
+    # to - the only way the Android host learns which viewers exist (see
+    # android/app/src/main/python/viewers.py). Empty = manifest publishing
+    # is a no-op, so this feature is entirely opt-in.
+    viewer_manifest_spreadsheet_id: str = ""
 
     @property
     def lite_llm_dir(self) -> Path:

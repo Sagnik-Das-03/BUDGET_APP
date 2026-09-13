@@ -17,10 +17,3 @@ service-account*.json
 
 # Claude Code plan files, if ever copied into the repo by accident
 .claude/
-
-# android_dashboard/ is desktop-testable (see its own docstring) - these are
-# per-install/per-test-run state, never source: the read-only Sheets key,
-# the LAN password's salted hash, and the local SQLite mirror of Sheets data.
-android_dashboard/dashboard_credentials.json
-android_dashboard/auth_config.json
-android_dashboard/dashboard_cache.db

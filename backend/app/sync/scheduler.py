@@ -19,6 +19,8 @@ from app.repositories.accounts import AccountRepository
 from app.sheets.adapter import GoogleSheetsService
 from app.sync import periods as periods_mod
 from app.sync.engine import compact_and_sort, run_sync_cycle
+from app.sync.reports import regenerate_viewer_manifest
+from app.user_registry import registry
 from typing import Optional
 
 MIN_INTERVAL_SECONDS = 15  # floor to avoid hammering the Sheets API from the UI
@@ -241,7 +243,28 @@ def set_spreadsheet_id(spreadsheet_id: str) -> str:
     _current_spreadsheet_id = spreadsheet_id
     _set_status(state="idle" if (is_credentials_configured() and spreadsheet_id) else "not_configured")
     logger.info("Spreadsheet id %s for the active user", "set" if spreadsheet_id else "cleared")
+
+    active = registry.get_active()
+    if active:
+        registry.set_spreadsheet_id(active, spreadsheet_id)
+    publish_viewer_manifest()
     return spreadsheet_id
+
+
+def publish_viewer_manifest() -> None:
+    """Best-effort - a manifest publish failure (network hiccup, manifest
+    not configured yet) must never block the spreadsheet-id change itself
+    that triggered it. No-op when settings.viewer_manifest_spreadsheet_id
+    is empty (the feature is entirely opt-in)."""
+    if not settings.viewer_manifest_spreadsheet_id:
+        return
+    try:
+        sheets = _sheets_client()
+        if sheets is None:
+            return
+        regenerate_viewer_manifest(sheets, settings.viewer_manifest_spreadsheet_id)
+    except Exception:
+        logger.exception("Failed to publish the viewer manifest")
 
 
 def _migrate_legacy_spreadsheet_id(session) -> None:

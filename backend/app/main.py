@@ -1,8 +1,9 @@
 import logging
+import os
 from pathlib import Path
 
-from fastapi import Depends, FastAPI
-from fastapi.responses import FileResponse
+from fastapi import Depends, FastAPI, Request
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api import (
@@ -10,6 +11,7 @@ from app.api import (
     savings_goal, sync, transactions, users,
 )
 from app.auth import require_auth
+from app.config import settings
 from app.db import init_db, session_scope
 from app.llm.router import llm_router
 from app.repositories.accounts import AccountRepository
@@ -18,10 +20,31 @@ from app.sync import scheduler
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
-# backend/app/main.py -> backend/app -> backend -> budget_tracker -> frontend/dist
-FRONTEND_DIST = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
+# Overridable so the Android host can point this at Chaquopy's app-private
+# storage, where the frontend build is copied to instead of a sibling of
+# this repo. Not read anywhere by desktop/Docker, which never sets this.
+if os.environ.get("BUDGET_TRACKER_FRONTEND_DIST"):
+    FRONTEND_DIST = Path(os.environ["BUDGET_TRACKER_FRONTEND_DIST"])
+else:
+    # backend/app/main.py -> backend/app -> backend -> budget_tracker -> frontend/dist
+    FRONTEND_DIST = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
 
 app = FastAPI(title="Budget Tracker")
+
+
+@app.middleware("http")
+async def enforce_read_only(request: Request, call_next):
+    """The Android host (see android/app/src/main/python/server.py) sets
+    read_only_mode=True - every write route is blocked here, in ONE place,
+    rather than annotating each mutating endpoint individually. A no-op on
+    desktop/Docker, where the flag defaults to False and this middleware
+    never rejects anything."""
+    if settings.read_only_mode and request.method not in ("GET", "HEAD", "OPTIONS"):
+        return JSONResponse(
+            {"detail": "This server is read-only - editing happens in the main app."},
+            status_code=403,
+        )
+    return await call_next(request)
 
 _auth = [Depends(require_auth)]
 app.include_router(transactions.router, dependencies=_auth)
@@ -45,14 +68,21 @@ def on_startup() -> None:
     with session_scope() as session:
         CategoryRepository(session).ensure_defaults()
         AccountRepository(session).ensure_default()
-    scheduler.start()
+    # The Android host runs its OWN pull-only refresh loop (see
+    # android/app/src/main/python/viewers.py) instead of this bidirectional
+    # scheduler - there's nothing local to push (writes are blocked by
+    # enforce_read_only above), and its Viewer-only credentials couldn't
+    # push even if something tried to.
+    if not settings.read_only_mode:
+        scheduler.start()
     llm_router.warm_up()
 
 
 @app.on_event("shutdown")
 def on_shutdown() -> None:
-    scheduler.run_once()  # final sync before shutting down
-    scheduler.stop()
+    if not settings.read_only_mode:
+        scheduler.run_once()  # final sync before shutting down
+        scheduler.stop()
     llm_router.shutdown()
 
 
