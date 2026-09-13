@@ -18,6 +18,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { MultiSelectFilter } from '@/components/MultiSelectFilter';
 import { SaveViewPopover } from '@/components/SaveViewPopover';
 import { ModelBadge } from '@/components/ModelBadge';
+import { useCapabilities } from '@/lib/useCapabilities';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July',
   'August', 'September', 'October', 'November', 'December'];
@@ -84,6 +85,7 @@ function computeTotals(rows: Transaction[]) {
 }
 
 export function Transactions() {
+  const { readOnly } = useCapabilities();
   const queryClient = useQueryClient();
   const { confirm, dialog: confirmDialog } = useConfirmDialog();
   const [year, setYear] = useState('');
@@ -103,7 +105,9 @@ export function Transactions() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<EditDraft | null>(null);
   const [quickAddText, setQuickAddText] = useState('');
-  const savedViewsQuery = useQuery({ queryKey: ['savedViews'], queryFn: () => api.listSavedViews() });
+  const savedViewsQuery = useQuery({
+    queryKey: ['savedViews'], queryFn: () => api.listSavedViews(), enabled: !readOnly,
+  });
   const savedViews = savedViewsQuery.data ?? [];
   const [compareIds, setCompareIds] = useState<Set<number>>(new Set());
 
@@ -116,7 +120,7 @@ export function Transactions() {
   // not a risk worth taking for a few bytes of localStorage.
   const migratedLegacyViews = useRef(false);
   useEffect(() => {
-    if (migratedLegacyViews.current || !savedViewsQuery.isSuccess || savedViewsQuery.data.length > 0) return;
+    if (readOnly || migratedLegacyViews.current || !savedViewsQuery.isSuccess || savedViewsQuery.data.length > 0) return;
     migratedLegacyViews.current = true;
     try {
       const raw = localStorage.getItem('budget_tracker.savedViews');
@@ -374,33 +378,41 @@ const saveView = useMutation({
     <>
       <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-2xl font-bold tracking-tight">Transactions</h1>
-        <label className="flex items-center gap-2 text-sm">
-          {editsLocked ? <Lock className="size-4 text-muted-foreground" /> : <Unlock className="size-4 text-muted-foreground" />}
-          <Label className="text-sm text-muted-foreground">{editsLocked ? 'Edits locked' : 'Edits enabled'}</Label>
-          <Switch checked={!editsLocked} onCheckedChange={(v) => setEditsLocked(!v)} aria-label="Enable editing transactions" />
-        </label>
-      </div>
-      <p className="mb-5 mt-1 text-sm text-muted-foreground">Every transaction across every month and year, in one place.</p>
-
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        <Sparkles className="size-4 shrink-0 text-primary" />
-        <Input
-          placeholder='Quick add: "Zomato 250 today"'
-          value={quickAddText}
-          onChange={(e) => setQuickAddText(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') runQuickAdd(); }}
-          className="max-w-xs"
-          disabled={editsLocked}
-        />
-        <Button variant="outline" size="sm" disabled={editsLocked || quickAdd.isPending || !quickAddText.trim()} onClick={runQuickAdd}>
-          {quickAdd.isPending ? 'Parsing…' : 'Add'}
-        </Button>
-        <ModelBadge task="quick_add" />
-        {quickAdd.isError && <span className="text-sm text-destructive">{(quickAdd.error as Error).message}</span>}
-        {!quickAdd.isPending && quickAddDuration !== null && (
-          <span className="text-xs text-muted-foreground">Parsed in {quickAddDuration.toFixed(1)}s</span>
+        {!readOnly && (
+          <label className="flex items-center gap-2 text-sm">
+            {editsLocked ? <Lock className="size-4 text-muted-foreground" /> : <Unlock className="size-4 text-muted-foreground" />}
+            <Label className="text-sm text-muted-foreground">{editsLocked ? 'Edits locked' : 'Edits enabled'}</Label>
+            <Switch checked={!editsLocked} onCheckedChange={(v) => setEditsLocked(!v)} aria-label="Enable editing transactions" />
+          </label>
         )}
       </div>
+      <p className="mb-5 mt-1 text-sm text-muted-foreground">
+        {readOnly
+          ? 'Every transaction across every month and year, in one place - viewing and editing happens in the main app.'
+          : 'Every transaction across every month and year, in one place.'}
+      </p>
+
+      {!readOnly && (
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <Sparkles className="size-4 shrink-0 text-primary" />
+          <Input
+            placeholder='Quick add: "Zomato 250 today"'
+            value={quickAddText}
+            onChange={(e) => setQuickAddText(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') runQuickAdd(); }}
+            className="max-w-xs"
+            disabled={editsLocked}
+          />
+          <Button variant="outline" size="sm" disabled={editsLocked || quickAdd.isPending || !quickAddText.trim()} onClick={runQuickAdd}>
+            {quickAdd.isPending ? 'Parsing…' : 'Add'}
+          </Button>
+          <ModelBadge task="quick_add" />
+          {quickAdd.isError && <span className="text-sm text-destructive">{(quickAdd.error as Error).message}</span>}
+          {!quickAdd.isPending && quickAddDuration !== null && (
+            <span className="text-xs text-muted-foreground">Parsed in {quickAddDuration.toFixed(1)}s</span>
+          )}
+        </div>
+      )}
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <Input type="number" placeholder="Year" value={year} onChange={(e) => setYear(e.target.value)} className="w-24" />
@@ -444,13 +456,15 @@ const saveView = useMutation({
             <X className="size-4" /> Clear
           </Button>
         )}
-        {hasActiveFilters && <SaveViewPopover filters={currentFiltersSnapshot()} onSave={saveCurrentView} />}
-        <Button size="sm" disabled={editsLocked} onClick={() => setShowAddForm(!showAddForm)}>
-          <Plus className="size-4" /> Add Transactions
-        </Button>
+        {!readOnly && hasActiveFilters && <SaveViewPopover filters={currentFiltersSnapshot()} onSave={saveCurrentView} />}
+        {!readOnly && (
+          <Button size="sm" disabled={editsLocked} onClick={() => setShowAddForm(!showAddForm)}>
+            <Plus className="size-4" /> Add Transactions
+          </Button>
+        )}
       </div>
 
-      {savedViews.length > 0 && (
+      {!readOnly && savedViews.length > 0 && (
         <div className="mb-4 flex flex-wrap items-center gap-2">
           <span className="text-xs text-muted-foreground">Saved views (check 2+ to compare):</span>
           {savedViews.map((v) => (
@@ -505,7 +519,7 @@ const saveView = useMutation({
         <span>Net <span className={`font-semibold ${filteredTotals.net >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-destructive'}`}>{fmtMoney(filteredTotals.net)}</span></span>
       </div>
 
-      {selected.size > 0 && (
+      {!readOnly && selected.size > 0 && (
         <div className="mb-4 flex items-center gap-2.5 rounded-lg border border-destructive/40 bg-destructive/5 px-3.5 py-2.5">
           <span className="text-sm font-medium">{selected.size} selected</span>
           <Button
@@ -525,7 +539,7 @@ const saveView = useMutation({
         </div>
       )}
 
-      {showAddForm && (
+      {!readOnly && showAddForm && (
         <Card className="mb-4 py-0">
           <div className="max-h-[420px] overflow-y-auto">
             <Table>
@@ -627,25 +641,28 @@ const saveView = useMutation({
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="w-8 pl-6">
-                <Checkbox
-                  checked={allVisibleSelected}
-                  onCheckedChange={(v) => toggleAll(v === true)}
-                  aria-label="Select all visible transactions"
-                />
-              </TableHead>
-              <TableHead>Date</TableHead><TableHead>Description</TableHead><TableHead>Category</TableHead>
+              {!readOnly && (
+                <TableHead className="w-8 pl-6">
+                  <Checkbox
+                    checked={allVisibleSelected}
+                    onCheckedChange={(v) => toggleAll(v === true)}
+                    aria-label="Select all visible transactions"
+                  />
+                </TableHead>
+              )}
+              <TableHead className={readOnly ? 'pl-6' : undefined}>Date</TableHead><TableHead>Description</TableHead><TableHead>Category</TableHead>
               <TableHead>Account</TableHead><TableHead>Type</TableHead>
-              <TableHead className="text-right">Amount</TableHead><TableHead>Sync</TableHead><TableHead></TableHead>
+              <TableHead className="text-right">Amount</TableHead>
+              {!readOnly && <><TableHead>Sync</TableHead><TableHead></TableHead></>}
             </TableRow>
           </TableHeader>
           <TableBody>
             {!pagedRows.length ? (
-              <TableRow><TableCell colSpan={9}>
+              <TableRow><TableCell colSpan={readOnly ? 6 : 9}>
                 <div className="py-8 text-center text-sm text-muted-foreground">No transactions match these filters.</div>
               </TableCell></TableRow>
             ) : pagedRows.map((t) => (
-              editingId === t.transaction_id && editDraft ? (
+              !readOnly && editingId === t.transaction_id && editDraft ? (
                 <TableRow key={t.transaction_id} data-state="selected">
                   <TableCell className="pl-6" />
                   <TableCell>
@@ -694,28 +711,34 @@ const saveView = useMutation({
                 </TableRow>
               ) : (
                 <TableRow key={t.transaction_id} data-state={selected.has(t.transaction_id) ? 'selected' : undefined}>
-                  <TableCell className="pl-6">
-                    <Checkbox
-                      checked={selected.has(t.transaction_id)}
-                      onCheckedChange={(v) => toggleRow(t.transaction_id, v === true)}
-                      aria-label={`Select ${t.description}`}
-                    />
-                  </TableCell>
-                  <TableCell className="whitespace-nowrap">{t.date}</TableCell>
+                  {!readOnly && (
+                    <TableCell className="pl-6">
+                      <Checkbox
+                        checked={selected.has(t.transaction_id)}
+                        onCheckedChange={(v) => toggleRow(t.transaction_id, v === true)}
+                        aria-label={`Select ${t.description}`}
+                      />
+                    </TableCell>
+                  )}
+                  <TableCell className={`whitespace-nowrap ${readOnly ? 'pl-6' : ''}`}>{t.date}</TableCell>
                   <TableCell className="max-w-[380px] whitespace-normal break-words">{t.description}</TableCell>
                   <TableCell>{t.category}</TableCell>
                   <TableCell>{t.account}</TableCell>
                   <TableCell>{t.transaction_type}</TableCell>
                   <TableCell className="text-right tabular-nums">{fmtMoney(t.amount)}</TableCell>
-                  <TableCell><Badge variant={SYNC_VARIANT[t.sync_status] ?? 'secondary'}>{t.sync_status}</Badge></TableCell>
-                  <TableCell className="whitespace-nowrap">
-                    <Button variant="outline" size="sm" disabled={editsLocked} onClick={() => startEdit(t)}>
-                      <Pencil className="size-4" />
-                    </Button>
-                    <Button variant="destructive" size="sm" className="ml-1.5" disabled={editsLocked} onClick={async () => {
-                      if (await confirm('Delete this transaction?')) deleteTxn.mutate(t.transaction_id);
-                    }}>Delete</Button>
-                  </TableCell>
+                  {!readOnly && (
+                    <>
+                      <TableCell><Badge variant={SYNC_VARIANT[t.sync_status] ?? 'secondary'}>{t.sync_status}</Badge></TableCell>
+                      <TableCell className="whitespace-nowrap">
+                        <Button variant="outline" size="sm" disabled={editsLocked} onClick={() => startEdit(t)}>
+                          <Pencil className="size-4" />
+                        </Button>
+                        <Button variant="destructive" size="sm" className="ml-1.5" disabled={editsLocked} onClick={async () => {
+                          if (await confirm('Delete this transaction?')) deleteTxn.mutate(t.transaction_id);
+                        }}>Delete</Button>
+                      </TableCell>
+                    </>
+                  )}
                 </TableRow>
               )
             ))}

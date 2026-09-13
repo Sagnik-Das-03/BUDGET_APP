@@ -421,11 +421,17 @@ budget_tracker/
       components/       NavBar, TopRightDrawers (Ask/Logs), UserSwitcher, SyncStatus, chart cards, etc.
       lib/api.ts         typed fetch wrappers - one function per backend endpoint
     dist/                the built app FastAPI serves (generated, gitignored)
+  server.py               entry point Kotlin calls (Python.getModule("server")) -
+                          sits OUTSIDE the android_dashboard/ package below, on
+                          purpose (matches android/'s Chaquopy layout exactly, so
+                          a path bug can't creep in between the two copies)
   android_dashboard/     standalone, no dependency on backend/ - read-only dashboard
-                          logic (Sheets reading, full calculations.py port, FastAPI
-                          server), testable on desktop before it's copied into android/;
-                          static/ holds a copy of frontend/dist, the same build the
-                          desktop app serves
+                          logic (Sheets reading, full calculations.py/filters.py
+                          port, auth.py's LAN password, local_db.py's SQLite
+                          cache, users_config.py's viewer list), testable on
+                          desktop before it's copied into android/; static/ holds
+                          a copy of frontend/dist, the same build the desktop app
+                          serves
   android/                a separate Android Studio project (Chaquopy: embeds
                           CPython + this same read-only logic in a phone app,
                           served over LAN) - see "Viewing your dashboard from
@@ -505,28 +511,55 @@ that build shows at runtime:
   separate identity from the desktop sync's read-write one (see
   `docs/service_account_setup.md` for that one; this needs its own, same
   steps, Viewer instead of Editor).
-- **Full dashboard parity**, not a trimmed-down view: `android_dashboard/
-  calculations.py` ports every `backend/app/dashboard/calculations.py`
-  function to work off parsed Sheet rows instead of a SQL session, so the
-  real Dashboard's charts, trends, budget/goal tracking, and breakdowns all
-  work identically. `android_dashboard/server.py` implements the same
-  `/api/dashboard/*` contract the desktop backend does. A new "Config" tab
-  (see `regenerate_config_tab()` in `backend/app/sync/reports.py`) exports
-  category colors/essential flags, budgets, and the savings goal to Sheets
-  so this server has everything it needs, with no local-only data left out.
-- **Multi-user without any of the desktop app's multi-user machinery.**
-  Sharing is per-spreadsheet, not per-credential, so the same read-only
-  service account can be Viewer on several different people's spreadsheets
-  independently. `android_dashboard/users_config.json` is just a
-  `{"name", "spreadsheet_id"}` list - no registry, no per-user database, no
-  passwords.
+- **Full dashboard AND transactions parity**, not a trimmed-down view:
+  `android_dashboard/calculations.py` ports every `backend/app/dashboard/
+  calculations.py` function to work off parsed Sheet rows instead of a SQL
+  session, so the real Dashboard's charts, trends, budget/goal tracking, and
+  breakdowns all work identically; `android_dashboard/filters.py` mirrors
+  `TransactionRepository.filter()`'s semantics for the Transactions page
+  (year/month, category/account include-or-exclude, type, search). Both
+  pages are the SAME components the desktop app uses (`Dashboard.tsx`,
+  `Transactions.tsx`) with editing/AI hidden via `useCapabilities()` - not
+  separate, hand-built views. A "Config" tab (see `regenerate_config_tab()`
+  in `backend/app/sync/reports.py`) exports category colors/essential
+  flags, budgets, and the savings goal to Sheets so this server has
+  everything it needs, with no local-only data left out.
+- **A local SQLite cache, refreshed on a timer.** `android_dashboard/
+  local_db.py` mirrors every configured viewer's parsed Sheet data to a
+  local `dashboard_cache.db`, refreshed every 60s by a background thread
+  (`server.py`'s `_background_refresh_loop`) instead of re-fetched from
+  Sheets on each request - filtering/paging through Transactions stays fast
+  regardless of Sheets API latency, and the last good data survives an app/
+  service restart instead of starting empty.
+- **A LAN password, set from the app itself.** The dashboard and everything
+  around it (including static assets) sits behind HTTP Basic Auth,
+  enforced by `server.py`'s `require_lan_password` middleware and checked
+  against a salted PBKDF2 hash (`android_dashboard/auth.py`) - the same
+  scheme the desktop app uses for its own per-user passwords. Unlike the
+  desktop's optional, off-by-default basic auth, this one **fails closed**:
+  the server refuses every request with a 503 until a password has been set
+  from the app's "LAN Password" card. This is separate from the app's own
+  biometric/PIN lock, which only guards the phone-side controls screen, not
+  the HTTP server every other device on the Wi-Fi talks to.
+- **Multi-user, managed from the app itself.** The app's "Viewers" card
+  (`MainActivity.kt`) calls straight into `android_dashboard/
+  users_config.py` (`add_user`/`remove_user`/`load_users_json`) through
+  Chaquopy - never over HTTP, since this is config, not something the read-
+  only guarantee should ever expose a write path for. Sharing is per-
+  spreadsheet, not per-credential, so the same read-only service account
+  can be Viewer on several people's spreadsheets independently; each viewer
+  gets its own isolated slice of the local SQLite cache (every table keyed
+  by name) - the equivalent, for a server that never writes anything of its
+  own, of the desktop's "each user is a separate database."
 - **Built with [Chaquopy](https://chaquo.com/chaquopy/)**, which embeds a
   real CPython 3.13 inside the Android app and pip-installs `fastapi`/
-  `uvicorn`/`google-api-python-client`/`google-auth` at build time - the
-  server runs inside a foreground `Service` (survives backgrounding) bound
-  to `0.0.0.0:8000`, so it's reachable from any device on the same LAN, not
-  just the phone itself. A biometric (or device PIN/pattern) lock guards the
-  app itself on launch/resume.
+  `uvicorn`/`google-api-python-client`/`google-auth` at build time (the
+  password/local-DB/filtering additions above are all stdlib - no new pip
+  packages needed) - the server runs inside a foreground `Service`
+  (survives backgrounding) bound to `0.0.0.0:8000`, so it's reachable from
+  any device on the same LAN, not just the phone itself. A biometric (or
+  device PIN/pattern) lock guards the app itself on launch/resume; the LAN
+  address card has a Copy button for pasting into another device's browser.
 
 **Setup:**
 1. Create a second Google Cloud service account (steps 3-4 of
@@ -534,18 +567,19 @@ that build shows at runtime:
    spreadsheet with it as **Viewer**.
 2. Drop its downloaded key at `android/app/src/main/python/
    dashboard_credentials.json` (gitignored - never commit it).
-3. List whoever you want to view in `android/app/src/main/python/
-   users_config.json`.
-4. From the repo root: `sync_android.bat` - builds the frontend (same
+3. From the repo root: `sync_android.bat` - builds the frontend (same
    `npm run build` as the desktop app, there's no separate Android build)
    and copies the output into both places the Python side reads it from
    (`android_dashboard/static/` and `android/app/src/main/python/static/`).
-5. Open `android/` in Android Studio (or run `.\gradlew.bat assembleDebug`
+4. Open `android/` in Android Studio (or run `.\gradlew.bat assembleDebug`
    from there) to build/install the APK - it lands at `android/app/build/
-   outputs/apk/debug/app-debug.apk`. Install it, open it once (starts the
-   foreground service), then visit `http://<phone's LAN IP>:8000` from any
-   device on the same network. Re-run `sync_android.bat` (then rebuild)
-   whenever the frontend changes.
+   outputs/apk/debug/app-debug.apk`. Install it, unlock it (biometric/PIN),
+   set a LAN password, and add yourself as a viewer (name + spreadsheet ID)
+   from the "Viewers" card - no need to hand-edit `users_config.json`
+   anymore. Start the server, then visit `http://<phone's LAN IP>:8000`
+   (shown with a Copy button) from any device on the same network, logging
+   in with the LAN password you set. Re-run `sync_android.bat` (then
+   rebuild) whenever the frontend changes.
 
 ## Running tests
 

@@ -38,8 +38,10 @@ export function NavBar() {
   const isAdmin = !readOnly && (users.data?.some((u) => u.is_active && u.username.toLowerCase() === 'admin') ?? false);
   // admin isn't a financial profile - it never has transactions of its own,
   // so it gets only user management, not the rest of the app's nav. The
-  // Android server only ever exposes the Dashboard.
-  const links = readOnly ? LINKS.slice(0, 1) : isAdmin ? ADMIN_LINKS : LINKS;
+  // Android server only exposes Dashboard + Transactions (both list-only,
+  // see useCapabilities()'s readOnly branch in each page) - Import/Compare/
+  // Conflicts/Trash/Settings all assume write endpoints it doesn't have.
+  const links = readOnly ? LINKS.slice(0, 2) : isAdmin ? ADMIN_LINKS : LINKS;
 
   return (
     <aside className="sticky top-0 flex h-screen w-60 shrink-0 flex-col border-r bg-card/80 backdrop-blur supports-backdrop-filter:bg-card/60">

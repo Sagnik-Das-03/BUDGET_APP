@@ -58,6 +58,7 @@ export function App() {
             {readOnly ? (
               <Routes>
                 <Route path="/" element={<Dashboard />} />
+                <Route path="/transactions" element={<Transactions />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
             ) : (
