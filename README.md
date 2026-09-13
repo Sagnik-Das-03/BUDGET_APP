@@ -481,6 +481,37 @@ python -m pytest tests/
 Tests run against an in-memory SQLite database and a fake Sheets adapter - no
 network calls, no real Google credentials needed.
 
+### Benchmarking local LLM models
+
+`backend/scripts/bench_llm.py` ranks the models configured in `app/llm/
+config.py` against a small hand-labeled test set, per task (`categorize`,
+`autocomplete`) - useful whenever you swap which model handles a task, or add
+a new model file, and want real accuracy/latency numbers instead of a
+handful of manual spot-checks. Not part of the pytest suite above: it needs
+the real multi-gigabyte `.litertlm` files on disk and takes real wall-clock
+time (several models, loaded and run back to back), so it's a manually-run
+tool, same as `scripts/seed_from_existing_xlsx.py` - it never touches a real
+user's database.
+
+```
+cd backend
+.venv\Scripts\activate
+python -m scripts.bench_llm
+```
+
+Narrow it down with either flag:
+```
+python -m scripts.bench_llm --tasks categorize
+python -m scripts.bench_llm --models qwen3_0_6b,deepseek_r1
+```
+
+It loads models directly (not through the running app), unloading each one
+before loading the next so only one is ever resident in memory at a time -
+still, stop `run.bat`'s server first if you're running the full suite, so
+you're not holding two copies of an overlapping model in memory at once.
+Prints a ranked table per task (accuracy, error count, average and total
+latency) at the end.
+
 ## A note on Python version
 
 `run.bat` pins the backend's virtual environment to Python 3.13 explicitly
