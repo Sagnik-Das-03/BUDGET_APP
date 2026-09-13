@@ -32,7 +32,7 @@ MODEL_DISPLAY_NAMES = {
 # than for a deliberate, occasional chat question or recap.
 TASK_MODEL = {
     "autocomplete": "smol_lm2",
-    "categorize": "deepseek_r1",
+    "categorize": "qwen3_0_6b",
     "suggest_view_name": "qwen3_0_6b",
     "query_parse": "qwen3_4b",
     "summarize": "qwen3_4b",

@@ -27,6 +27,13 @@ class Settings(BaseSettings):
     # Directory holding .litertlm model files for local AI features (see app/llm/).
     # Empty = default to backend/models.
     lite_llm_models_dir: str = ""
+    # "cpu" (default, dependable) or "gpu" (real speedup when it works, but
+    # was unreliable in past testing on this machine - engine creation can
+    # succeed while later inference calls fail outright). Opt-in per
+    # app/llm/router.py's per-call fallback: a failed GPU call retries once
+    # on CPU and that model then stays on CPU for the rest of the process,
+    # rather than silently staying broken or paying the failure cost twice.
+    llm_backend: str = "cpu"
 
     @property
     def lite_llm_dir(self) -> Path:

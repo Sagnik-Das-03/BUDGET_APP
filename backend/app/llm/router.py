@@ -4,6 +4,7 @@ import re
 import threading
 from typing import Any, Optional
 
+from app.config import settings
 from app.llm.config import EAGER_TASKS, TASK_MODEL, model_path
 
 logger = logging.getLogger("budget_tracker.llm")
@@ -28,6 +29,12 @@ class LLMRouter:
 
     def __init__(self):
         self._engines: dict[str, "litert_lm.Engine"] = {}
+        # Whichever backend actually ended up serving each model - not
+        # necessarily settings.llm_backend, since a GPU engine that fails at
+        # inference time gets swapped for a CPU one for the rest of the
+        # process (see _raw_complete's fallback). Exposed via backend_for()
+        # so callers (e.g. the benchmark script) can see when that happened.
+        self._engine_backend: dict[str, str] = {}
         self._lock = threading.Lock()
 
     @property
@@ -38,22 +45,48 @@ class LLMRouter:
     def unavailable_reason(self) -> Optional[str]:
         return None if self.available else str(_IMPORT_ERROR)
 
-    def _engine_for_model(self, model_key: str):
-        if model_key not in self._engines:
-            path = model_path(model_key)
-            if not path.exists():
-                raise RuntimeError(f"Model file not found: {path}")
-            logger.info("Loading LLM model %r from %s", model_key, path)
-            # Tried litert_lm.Backend.GPU() here - a real ~2.7x inference
-            # speedup when it worked, but it proved unreliable in testing:
-            # engine creation reported success, then later conversation.
-            # send_message() calls failed outright ("litert_lm_conversation_
-            # send_message failed"), a failure mode Engine construction alone
-            # can't catch or fall back from. CPU is the dependable default;
-            # revisit GPU only with a retry-on-CPU wrapped around every
-            # inference call, not just engine creation.
-            self._engines[model_key] = litert_lm.Engine(str(path), backend=litert_lm.Backend.CPU())
-        return self._engines[model_key]
+    def backend_for(self, model_key: str) -> Optional[str]:
+        return self._engine_backend.get(model_key)
+
+    def _create_engine(self, path, backend: str):
+        native_backend = litert_lm.Backend.GPU() if backend == "gpu" else litert_lm.Backend.CPU()
+        return litert_lm.Engine(str(path), backend=native_backend)
+
+    def _engine_for_model(self, model_key: str, backend: Optional[str] = None):
+        """Returns the cached engine for this model, (re)creating it if
+        there's none yet or the requested backend differs from whichever one
+        is currently cached (the GPU-failed-so-fall-back-to-CPU path)."""
+        backend = backend or settings.llm_backend
+        if model_key in self._engines and self._engine_backend.get(model_key) == backend:
+            return self._engines[model_key]
+
+        path = model_path(model_key)
+        if not path.exists():
+            raise RuntimeError(f"Model file not found: {path}")
+        logger.info("Loading LLM model %r from %s (backend=%s)", model_key, path, backend)
+        try:
+            engine = self._create_engine(path, backend)
+        except Exception:
+            # GPU engine CREATION failing outright is the easy case to catch
+            # here - the harder one (creation succeeds, later send_message()
+            # calls fail) is handled per-call in _raw_complete instead, since
+            # construction alone can't detect it.
+            if backend == "gpu":
+                logger.exception("GPU engine creation failed for %r - falling back to CPU", model_key)
+                engine = self._create_engine(path, "cpu")
+                backend = "cpu"
+            else:
+                raise
+
+        old = self._engines.get(model_key)
+        if old is not None and old is not engine:
+            try:
+                old.close()
+            except Exception:
+                logger.exception("Error closing previous engine for %r", model_key)
+        self._engines[model_key] = engine
+        self._engine_backend[model_key] = backend
+        return engine
 
     def warm_up(self) -> None:
         if not self.available:
@@ -87,6 +120,23 @@ class LLMRouter:
             raise ValueError(f"No model configured for task {task!r}")
         self._engine_for_model(model_key)
 
+    def _send_message(self, engine, prompt: str, *, system_message, max_output_tokens: int,
+                       enable_thinking: bool, constrained_decoding_config, response_format):
+        # Serialize calls per-process - keeps this simple and safe for a
+        # single-user local app rather than relying on the native lib's
+        # internal concurrency guarantees across conversations.
+        with self._lock:
+            conversation = engine.create_conversation(
+                system_message=system_message,
+                max_output_tokens=max_output_tokens,
+                thinking_config=litert_lm.ThinkingConfig(enable_thinking=enable_thinking),
+                constrained_decoding_config=constrained_decoding_config,
+            )
+            try:
+                return conversation.send_message(prompt, response_format=response_format)
+            finally:
+                conversation.close()
+
     def _raw_complete(
         self, task: str, prompt: str, *, system_message: Optional[str], max_output_tokens: int,
         enable_thinking: bool, response_format=None,
@@ -97,7 +147,6 @@ class LLMRouter:
         if not model_key:
             raise ValueError(f"No model configured for task {task!r}")
 
-        engine = self._engine_for_model(model_key)
         if not enable_thinking:
             # Reasoning models (Qwen3) burn their whole token budget on a
             # <think>...</think> block before ever answering unless told not
@@ -113,20 +162,28 @@ class LLMRouter:
                 enable=True, provider=litert_lm.LiteRtLmConstraintProviderType.LL_GUIDANCE,
             )
 
-        # Serialize calls per-process - keeps this simple and safe for a
-        # single-user local app rather than relying on the native lib's
-        # internal concurrency guarantees across conversations.
-        with self._lock:
-            conversation = engine.create_conversation(
-                system_message=system_message,
-                max_output_tokens=max_output_tokens,
-                thinking_config=litert_lm.ThinkingConfig(enable_thinking=enable_thinking),
-                constrained_decoding_config=constrained_decoding_config,
+        engine = self._engine_for_model(model_key)
+        try:
+            response = self._send_message(
+                engine, prompt, system_message=system_message, max_output_tokens=max_output_tokens,
+                enable_thinking=enable_thinking, constrained_decoding_config=constrained_decoding_config,
+                response_format=response_format,
             )
-            try:
-                response = conversation.send_message(prompt, response_format=response_format)
-            finally:
-                conversation.close()
+        except Exception:
+            if self._engine_backend.get(model_key) != "gpu":
+                raise
+            # The documented GPU failure mode: engine CREATION succeeded but
+            # this actual inference call failed outright. Retry once on a
+            # fresh CPU engine for this model - _engine_for_model() replaces
+            # the cached GPU engine with it, so every later call for this
+            # model skips GPU entirely instead of paying this failure again.
+            logger.exception("GPU inference failed for model %r - falling back to CPU", model_key)
+            engine = self._engine_for_model(model_key, backend="cpu")
+            response = self._send_message(
+                engine, prompt, system_message=system_message, max_output_tokens=max_output_tokens,
+                enable_thinking=enable_thinking, constrained_decoding_config=constrained_decoding_config,
+                response_format=response_format,
+            )
 
         for block in response.get("content", []):
             if isinstance(block, dict) and block.get("type") == "text":
