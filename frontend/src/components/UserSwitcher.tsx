@@ -8,11 +8,13 @@ import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
-// The Android read-only server (see android_dashboard/server.py) has no
-// per-user database/registry/passwords - it's just a list of Sheets it can
-// view, with one "active" one at a time (GET/POST /api/active_user). Kept
-// as a separate, much simpler branch rather than teaching the desktop flow
-// below about a user shape it doesn't have.
+// The Android host (see android/app/src/main/python/server.py's
+// _install_viewer_routes) exposes just these two tiny routes for switching
+// which viewer's local database the rest of the API reads from - GET even
+// for the switch itself, since the read-only middleware blocks every other
+// HTTP method on this server and picking who to view isn't a write worth an
+// exception for. Kept as a separate, much simpler branch rather than
+// teaching the desktop flow below about a user shape it doesn't have.
 function ReadOnlyUserSwitcher() {
   const queryClient = useQueryClient();
   const users = useQuery({ queryKey: ['users'], queryFn: () => request<{ name: string }[]>('/users') });
@@ -21,7 +23,7 @@ function ReadOnlyUserSwitcher() {
   if (!users.data || users.data.length <= 1) return null;
 
   async function select(name: string) {
-    await request('/api/active_user', { method: 'POST', body: JSON.stringify({ name }) });
+    await request(`/api/active_user/${encodeURIComponent(name)}`);
     queryClient.invalidateQueries();
   }
 

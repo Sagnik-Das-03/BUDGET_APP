@@ -37,6 +37,13 @@ logger = logging.getLogger("budget_dashboard.viewers")
 VIEWERS_JSON_PATH = BASE_DIR / "viewers.json"
 CREDENTIALS_PATH = BASE_DIR / "dashboard_credentials.json"
 
+# Which viewer's database app.db's engine is currently pointed at - tracked
+# here (not read back from app.db, which has no concept of "viewer", only
+# "whatever file the engine happens to be bound to") so both MainActivity.kt
+# and the web app's own switcher (server.py's /api/active_user route) can
+# ask "who am I looking at right now".
+_active_viewer_name: Optional[str] = None
+
 
 def _db_file_for(name: str) -> str:
     return f"viewer_{name}.db"
@@ -119,11 +126,28 @@ def activate_viewer(name: str) -> None:
     transactions.py, via the normal get_session() dependency) at this
     viewer's local database - rendering is always from that local copy,
     never a live Sheets call per request."""
+    global _active_viewer_name
     if name not in _load_viewers():
         raise ValueError(f"Unknown viewer {name!r}")
     db_file = _db_file_for(name)
     create_empty_db(db_file)
     switch_active_db(db_file)
+    _active_viewer_name = name
+
+
+def get_active_viewer() -> Optional[str]:
+    """None only when no viewer has ever been activated AND none are known
+    yet - once at least one viewer exists, this lazily activates the first
+    one (alphabetically) so the dashboard has something to show without
+    requiring an explicit switch first, same as opening the app fresh."""
+    global _active_viewer_name
+    if _active_viewer_name is not None:
+        return _active_viewer_name
+    names = list_viewers()
+    if not names:
+        return None
+    activate_viewer(names[0])
+    return _active_viewer_name
 
 
 def refresh_all() -> None:

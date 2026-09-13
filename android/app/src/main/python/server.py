@@ -55,11 +55,49 @@ def _background_refresh_loop() -> None:
         time.sleep(REFRESH_INTERVAL_SECONDS)
 
 
+def _install_viewer_routes(app) -> None:
+    """The web app's UserSwitcher.tsx (ReadOnlyUserSwitcher) calls these -
+    the same small contract the old android_dashboard/server.py used to
+    serve directly. GET, not POST, even for switching: app/main.py's
+    enforce_read_only middleware blocks every non-GET/HEAD/OPTIONS request
+    on this `app` instance, including routes added here afterwards, and
+    picking who to VIEW isn't a ledger write worth carving a middleware
+    exception for. Spliced in at the FRONT of app.routes, not appended -
+    app/main.py's own catch-all SPA route ("/{full_path:path}") is a path
+    converter that matches everything, so routes added after it would never
+    be reached if simply appended."""
+    import fastapi
+
+    router = fastapi.APIRouter()
+
+    @router.get("/users")
+    def _list_viewers():
+        return [{"name": name} for name in viewers.list_viewers()]
+
+    @router.get("/api/active_user")
+    def _get_active_viewer():
+        name = viewers.get_active_viewer()
+        if name is None:
+            raise fastapi.HTTPException(404, "No viewers available yet")
+        return {"name": name}
+
+    @router.get("/api/active_user/{name}")
+    def _set_active_viewer(name: str):
+        try:
+            viewers.activate_viewer(name)
+        except ValueError as e:
+            raise fastapi.HTTPException(404, str(e)) from e
+        return {"name": name}
+
+    app.routes[0:0] = router.routes
+
+
 def start_server(host: str = "0.0.0.0", port: int = 8000) -> None:
     import uvicorn
 
     from app.main import app
 
+    _install_viewer_routes(app)
     threading.Thread(target=_background_refresh_loop, daemon=True).start()
     uvicorn.run(app, host=host, port=port, log_level="info")
 
