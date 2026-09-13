@@ -12,9 +12,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.dashboard import calculations as calc
-from app.models import MonthlyPeriod, SavedView, Transaction, TransactionType
+from app.models import MonthlyPeriod, SavedView, SavingsGoal, Transaction, TransactionType
 from app.repositories.accounts import AccountRepository
+from app.repositories.budgets import BudgetRepository
 from app.repositories.categories import CategoryRepository
+from app.repositories.savings_goal import SavingsGoalRepository
 from app.repositories.transactions import TransactionRepository
 from app.sheets import formatting, mapping
 from app.sheets.adapter import GoogleSheetsService
@@ -349,8 +351,51 @@ def regenerate_saved_view_tab(session: Session, sheets: GoogleSheetsService, spr
     return _rewrite_tab(sheets, spreadsheet_id, view.name, grid, header_rows0, currency_ranges, [])
 
 
+def regenerate_config_tab(session: Session, sheets: GoogleSheetsService, spreadsheet_id: str) -> None:
+    """Exports the config that otherwise only lives in the local database -
+    each category's color/counts_as_expense/is_essential flags, per-category
+    budget goals, and the Net Savings goal - so nothing needed to reproduce
+    the Dashboard's numbers is local-only. Written here rather than left for
+    a read-only consumer (e.g. a phone-only viewer with no database of its
+    own) to have to guess at defaults for data it has no other way to see."""
+    categories = CategoryRepository(session).list(include_inactive=True)
+    budgets = BudgetRepository(session).list()
+    savings_goals = list(session.scalars(select(SavingsGoal)))
+
+    grid: list[list] = [["App Configuration"], [NOTE], []]
+    header_rows0: list[tuple[int, int]] = []
+
+    grid.append(["Categories"])
+    header_rows0.append((len(grid), 4))
+    grid.append(["Category", "Color", "Counts As Expense", "Is Essential"])
+    for c in categories:
+        grid.append([c.name, c.color_hex, str(c.counts_as_expense), str(c.is_essential)])
+    grid.append([])
+
+    grid.append(["Budgets (blank Period = recurring monthly default)"])
+    header_rows0.append((len(grid), 3))
+    grid.append(["Category", "Period", "Goal Amount"])
+    currency_ranges: list[tuple[int, int, int, int]] = []
+    budgets_start0 = len(grid)
+    for b in budgets:
+        grid.append([b.category.name, b.period_key or "", b.goal_amount])
+    currency_ranges.append((budgets_start0, len(grid), 2, 3))
+    grid.append([])
+
+    grid.append(["Savings Goal (blank Period = recurring monthly default)"])
+    header_rows0.append((len(grid), 2))
+    grid.append(["Period", "Goal Amount"])
+    goals_start0 = len(grid)
+    for g in savings_goals:
+        grid.append([g.period_key or "", g.goal_amount])
+    currency_ranges.append((goals_start0, len(grid), 1, 2))
+
+    _rewrite_tab(sheets, spreadsheet_id, "Config", grid, header_rows0, currency_ranges, [])
+
+
 def regenerate_all(session: Session, sheets: GoogleSheetsService, spreadsheet_id: str) -> dict:
     regenerate_dashboard(session, sheets, spreadsheet_id)
+    regenerate_config_tab(session, sheets, spreadsheet_id)
     periods = list(session.scalars(select(MonthlyPeriod).order_by(MonthlyPeriod.period_key)))
     for period in periods:
         regenerate_month_tab(session, sheets, spreadsheet_id, period)

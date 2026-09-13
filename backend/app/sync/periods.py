@@ -10,7 +10,7 @@ from typing import Optional
 
 PERIOD_RE = re.compile(r"^\d{4}-\d{2}$")
 
-RESERVED_SHEET_NAMES = {"Transactions", "Dashboard", "Monthly Breakdown", "Weekly Summary", "Yearly Summary"}
+RESERVED_SHEET_NAMES = {"Transactions", "Dashboard", "Config", "Monthly Breakdown", "Weekly Summary", "Yearly Summary"}
 
 
 def ensure_period(session: Session, period_key: str, *, discovered_from_sheet: bool = False,
@@ -46,7 +46,7 @@ def reorder_period_tabs(session: Session, sheets: GoogleSheetsService, spreadshe
     wherever the tab bar happens to end at creation time, so left alone
     they drift into a jumbled, non-chronological order over time.
 
-    Final layout: Transactions, Dashboard, Yearly Summary, Monthly
+    Final layout: Transactions, Dashboard, Config, Yearly Summary, Monthly
     Breakdown, Weekly Summary, then each saved view's own tab (see
     app/sync/reports.py's regenerate_saved_view_tab) in whatever order
     SavedView rows come back in, then every dated tab in the chosen order.
@@ -57,7 +57,7 @@ def reorder_period_tabs(session: Session, sheets: GoogleSheetsService, spreadshe
     by_title = {s.title: s.sheet_id for s in all_sheets}
 
     dated_titles = sorted((t for t in by_title if PERIOD_RE.match(t)), reverse=descending)
-    front = [t for t in ("Transactions", "Dashboard", "Yearly Summary", "Monthly Breakdown", "Weekly Summary")
+    front = [t for t in ("Transactions", "Dashboard", "Config", "Yearly Summary", "Monthly Breakdown", "Weekly Summary")
              if t in by_title]
     saved_view_titles = [v.name for v in session.scalars(select(SavedView)) if v.name in by_title]
     placed = set(front) | set(saved_view_titles) | set(dated_titles)

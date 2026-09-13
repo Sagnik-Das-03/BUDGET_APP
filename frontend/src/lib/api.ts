@@ -7,7 +7,11 @@ import type {
   UserStats, ViewFilters,
 } from './types';
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
+// Exported (not just used internally by `api` below) so the Android build's
+// own small endpoints (/users, /api/active_user - see AndroidApp.tsx) that
+// don't fit the desktop `api` object's shape can still get the same clean
+// error-message handling instead of duplicating it.
+export async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     headers: { 'Content-Type': 'application/json' },
     ...options,
