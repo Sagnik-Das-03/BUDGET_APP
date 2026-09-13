@@ -36,8 +36,12 @@ a path relative to this module):
                                   reader identity can view many people's
                                   sheets independently, each still only
                                   ever read-only).
-    static/                      the built frontend (see frontend/'s
-                                  android build target) - served at "/".
+    static/                      a copy of frontend/dist (the SAME build the
+                                  desktop app serves) - served at "/". Not a
+                                  separate build; Dashboard.tsx/NavBar.tsx/
+                                  App.tsx hide editing/AI/nav at runtime based
+                                  on the read_only flag this module's
+                                  /api/sync/config returns.
 """
 import json
 import time
@@ -147,6 +151,10 @@ def sync_config():
         "google_spreadsheet_id": _active_user().get("spreadsheet_id", ""),
         "sync_interval_seconds": 0, "sync_interval_default": 0, "sync_interval_min": 0,
         "sheet_sort_descending": True, "period_tab_sort_descending": True,
+        # The single frontend build (frontend/dist, same as the desktop app)
+        # reads this to hide editing/AI/non-Dashboard nav at runtime - see
+        # App.tsx/NavBar.tsx/Dashboard.tsx's useCapabilities() usage.
+        "read_only": True,
     }
 
 
@@ -276,9 +284,10 @@ if STATIC_DIR.is_dir():
         candidate = STATIC_DIR / full_path
         if full_path and candidate.is_file():
             return FileResponse(candidate)
-        # frontend/vite.android.config.ts's entry is android.html, not the
-        # usual index.html - Vite names the built output after the entry.
-        return FileResponse(STATIC_DIR / "android.html")
+        # static/ is the SAME build as the desktop app's frontend/dist (see
+        # this module's docstring) - one frontend, capability-gated at
+        # runtime via /api/sync/config's read_only flag, not a separate build.
+        return FileResponse(STATIC_DIR / "index.html")
 
 
 def start_server(host: str = "0.0.0.0", port: int = 8000) -> None:

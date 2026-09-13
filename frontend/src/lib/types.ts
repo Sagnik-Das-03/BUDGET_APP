@@ -363,4 +363,8 @@ export interface SyncConfig {
   sync_interval_min: number;
   sheet_sort_descending: boolean;
   period_tab_sort_descending: boolean;
+  // true only on the Android read-only server - the single frontend build
+  // uses this to hide editing/AI features and non-Dashboard nav at runtime
+  // instead of shipping a separate app/build for that backend.
+  read_only: boolean;
 }

@@ -57,6 +57,7 @@ def config():
         "sync_interval_min": scheduler.MIN_INTERVAL_SECONDS,
         "sheet_sort_descending": scheduler.get_sort_descending(),
         "period_tab_sort_descending": scheduler.get_tab_sort_descending(),
+        "read_only": False,
     }
 
 

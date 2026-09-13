@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
+import { useCapabilities } from '@/lib/useCapabilities';
 import { SyncStatusWidget } from './SyncStatus';
 import { UserSwitcher } from './UserSwitcher';
 
@@ -26,13 +27,19 @@ const ADMIN_LINKS = [
 // Ask and Logs live in TopRightDrawers (rendered from App.tsx) instead of
 // here - they're drawers reachable from every page, not routed tabs.
 export function NavBar() {
+  const { readOnly, loaded } = useCapabilities();
   // Same query UserSwitcher already runs, so this is a cache hit, not an
-  // extra request - just used here to decide the nav's whole shape.
-  const users = useQuery({ queryKey: ['users'], queryFn: () => api.listUsers() });
-  const isAdmin = users.data?.some((u) => u.is_active && u.username.toLowerCase() === 'admin') ?? false;
+  // extra request - just used here to decide the nav's whole shape. Only
+  // enabled once we know we're NOT talking to the Android read-only server,
+  // which has no /api/users at all.
+  const users = useQuery({
+    queryKey: ['users'], queryFn: () => api.listUsers(), enabled: loaded && !readOnly,
+  });
+  const isAdmin = !readOnly && (users.data?.some((u) => u.is_active && u.username.toLowerCase() === 'admin') ?? false);
   // admin isn't a financial profile - it never has transactions of its own,
-  // so it gets only user management, not the rest of the app's nav.
-  const links = isAdmin ? ADMIN_LINKS : LINKS;
+  // so it gets only user management, not the rest of the app's nav. The
+  // Android server only ever exposes the Dashboard.
+  const links = readOnly ? LINKS.slice(0, 1) : isAdmin ? ADMIN_LINKS : LINKS;
 
   return (
     <aside className="sticky top-0 flex h-screen w-60 shrink-0 flex-col border-r bg-card/80 backdrop-blur supports-backdrop-filter:bg-card/60">
@@ -62,7 +69,7 @@ export function NavBar() {
       </nav>
       <div className="flex flex-col gap-2.5 border-t px-3 py-3">
         <UserSwitcher />
-        {!isAdmin && <SyncStatusWidget />}
+        {!isAdmin && !readOnly && <SyncStatusWidget />}
       </div>
     </aside>
   );

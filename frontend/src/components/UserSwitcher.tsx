@@ -1,18 +1,49 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Plus, User as UserIcon } from 'lucide-react';
-import { api } from '../lib/api';
+import { api, request } from '../lib/api';
+import { useCapabilities } from '../lib/useCapabilities';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+
+// The Android read-only server (see android_dashboard/server.py) has no
+// per-user database/registry/passwords - it's just a list of Sheets it can
+// view, with one "active" one at a time (GET/POST /api/active_user). Kept
+// as a separate, much simpler branch rather than teaching the desktop flow
+// below about a user shape it doesn't have.
+function ReadOnlyUserSwitcher() {
+  const queryClient = useQueryClient();
+  const users = useQuery({ queryKey: ['users'], queryFn: () => request<{ name: string }[]>('/users') });
+  const active = useQuery({ queryKey: ['activeUser'], queryFn: () => request<{ name: string }>('/api/active_user') });
+
+  if (!users.data || users.data.length <= 1) return null;
+
+  async function select(name: string) {
+    await request('/api/active_user', { method: 'POST', body: JSON.stringify({ name }) });
+    queryClient.invalidateQueries();
+  }
+
+  return (
+    <div className="flex items-center gap-1.5">
+      <UserIcon className="size-3.5 shrink-0 text-muted-foreground" />
+      <Select value={active.data?.name} onValueChange={select}>
+        <SelectTrigger size="sm" className="h-7 flex-1 text-xs"><SelectValue /></SelectTrigger>
+        <SelectContent>
+          {users.data.map((u) => <SelectItem key={u.name} value={u.name}>{u.name}</SelectItem>)}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
 
 // Switching users means switching to a completely different SQLite file on
 // the backend - every piece of client state (React Query cache, and every
 // component's own local state) is scoped to whichever user was active when
 // it was created, so a full reload is the only way to guarantee none of the
 // previous user's data lingers on screen after the switch.
-export function UserSwitcher() {
+function DesktopUserSwitcher() {
   const queryClient = useQueryClient();
   const users = useQuery({ queryKey: ['users'], queryFn: () => api.listUsers() });
   const [creating, setCreating] = useState(false);
@@ -136,4 +167,10 @@ export function UserSwitcher() {
       )}
     </div>
   );
+}
+
+export function UserSwitcher() {
+  const { readOnly, loaded } = useCapabilities();
+  if (!loaded) return null;
+  return readOnly ? <ReadOnlyUserSwitcher /> : <DesktopUserSwitcher />;
 }

@@ -18,6 +18,7 @@ import { SpendingPatternCard } from '../components/SpendingPatternCard';
 import { SavingsRateTrendChart } from '../components/SavingsRateTrendChart';
 import { EssentialSplitCard } from '../components/EssentialSplitCard';
 import { SortableGrid } from '../components/SortableGrid';
+import { useCapabilities } from '../lib/useCapabilities';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 const RANGE_LABEL: Record<RangeKey, string> = {
@@ -25,6 +26,7 @@ const RANGE_LABEL: Record<RangeKey, string> = {
 };
 
 export function Dashboard() {
+  const { readOnly } = useCapabilities();
   const [range, setRangeRaw] = useState<RangeKey>('this_month');
   const [selectedMonth, setSelectedMonthRaw] = useState<string | null>(null);
   const [selectedYear, setSelectedYearRaw] = useState<string | null>(null);
@@ -217,7 +219,9 @@ export function Dashboard() {
     <>
       <h1 className="text-2xl font-bold tracking-tight">Finance Dashboard</h1>
       <p className="mb-5 mt-1 text-sm text-muted-foreground">
-        {config.data?.credentials_configured
+        {readOnly
+          ? 'Read-only, live from Google Sheets — viewing and editing transactions happens in the main app.'
+          : config.data?.credentials_configured
           ? 'Live view of your budget, computed straight from the database.'
           : <>⚙ Google Sheets sync isn't configured yet — see <a href="/settings" className="underline underline-offset-2">Settings</a>. The dashboard below still works from local data.</>}
       </p>
@@ -252,9 +256,11 @@ export function Dashboard() {
       <MetricsRow highlights={highlights.data} />
       <KpiRow tiles={tiles} />
 
-      <div className="mb-5">
-        <InsightCard range={effectiveRange} dateBounds={effectiveBounds} label={categoryLabel} />
-      </div>
+      {!readOnly && (
+        <div className="mb-5">
+          <InsightCard range={effectiveRange} dateBounds={effectiveBounds} label={categoryLabel} />
+        </div>
+      )}
 
       <SortableGrid
         storageKey="dashboard.cardOrder"

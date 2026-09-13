@@ -422,8 +422,10 @@ budget_tracker/
       lib/api.ts         typed fetch wrappers - one function per backend endpoint
     dist/                the built app FastAPI serves (generated, gitignored)
   android_dashboard/     standalone, no dependency on backend/ - read-only dashboard
-                          logic (Sheets reading, totals, HTML view), testable on desktop
-                          before it's copied into android/
+                          logic (Sheets reading, full calculations.py port, FastAPI
+                          server), testable on desktop before it's copied into android/;
+                          static/ holds a copy of frontend/dist, the same build the
+                          desktop app serves
   android/                a separate Android Studio project (Chaquopy: embeds
                           CPython + this same read-only logic in a phone app,
                           served over LAN) - see "Viewing your dashboard from
@@ -481,29 +483,41 @@ unless you first clear `backend/data/sagnik.db`.
 
 ## Viewing your dashboard from your phone
 
-A separate, much smaller Android app - **not** the desktop app itself, and
-**not** the React frontend - for glancing at your numbers from your phone
-over LAN. It's a deliberate scope cut, not a shrunk-down port:
+A separate, much smaller Android app - **not** the desktop app's backend -
+for glancing at your numbers from your phone over LAN. It reuses the exact
+same React build the desktop app serves (`frontend/dist`); there is only
+ever one frontend build. What differs is the backend behind it and what
+that build shows at runtime:
 
+- **One frontend, capability-gated at runtime.** `frontend/src/lib/
+  useCapabilities.ts` reads a `read_only` flag off `/api/sync/config`.
+  `App.tsx`/`NavBar.tsx`/`Dashboard.tsx` use it to show only the Dashboard
+  tab, hide the Ask/Sync-Logs drawers and the AI insight card (all of which
+  need endpoints this server doesn't implement), and swap in a simpler
+  view-only user switcher - no second build, no duplicated components to
+  keep in sync.
 - **Read-only, by design and by construction.** No local database, no sync
-  engine, no write path in the code at all - `android/app/src/main/python/
-  android_dashboard/sheets_reader.py`'s `ReadOnlySheetsClient` only
-  implements `get_rows()`; there's no update/append/clear method to even
-  misuse. The real enforcement is Google's own: the service account backing
-  this app must be shared as **Viewer** (never Editor) on your spreadsheet,
-  a completely separate identity from the desktop sync's read-write one
-  (see `docs/service_account_setup.md` for that one; this needs its own,
-  same steps, Viewer instead of Editor).
-- **A small hand-written page, not the real frontend.** The React app
-  assumes the full backend API (transactions, categories, imports, the
-  works) - none of which exists here. `android/app/src/main/python/
-  server.py` instead renders a simple HTML dashboard (this month/year/
-  all-time totals, top categories) directly from parsed Sheet rows, plus a
-  `/dashboard` JSON endpoint if you'd rather build a native UI against it.
+  engine, no write path in the code at all - `android_dashboard/
+  sheets_reader.py`'s `ReadOnlySheetsClient` only implements `get_rows()`;
+  there's no update/append/clear method to even misuse. The real
+  enforcement is Google's own: the service account backing this app must be
+  shared as **Viewer** (never Editor) on your spreadsheet, a completely
+  separate identity from the desktop sync's read-write one (see
+  `docs/service_account_setup.md` for that one; this needs its own, same
+  steps, Viewer instead of Editor).
+- **Full dashboard parity**, not a trimmed-down view: `android_dashboard/
+  calculations.py` ports every `backend/app/dashboard/calculations.py`
+  function to work off parsed Sheet rows instead of a SQL session, so the
+  real Dashboard's charts, trends, budget/goal tracking, and breakdowns all
+  work identically. `android_dashboard/server.py` implements the same
+  `/api/dashboard/*` contract the desktop backend does. A new "Config" tab
+  (see `regenerate_config_tab()` in `backend/app/sync/reports.py`) exports
+  category colors/essential flags, budgets, and the savings goal to Sheets
+  so this server has everything it needs, with no local-only data left out.
 - **Multi-user without any of the desktop app's multi-user machinery.**
   Sharing is per-spreadsheet, not per-credential, so the same read-only
   service account can be Viewer on several different people's spreadsheets
-  independently. `android/app/src/main/python/users_config.json` is just a
+  independently. `android_dashboard/users_config.json` is just a
   `{"name", "spreadsheet_id"}` list - no registry, no per-user database, no
   passwords.
 - **Built with [Chaquopy](https://chaquo.com/chaquopy/)**, which embeds a
@@ -511,7 +525,8 @@ over LAN. It's a deliberate scope cut, not a shrunk-down port:
   `uvicorn`/`google-api-python-client`/`google-auth` at build time - the
   server runs inside a foreground `Service` (survives backgrounding) bound
   to `0.0.0.0:8000`, so it's reachable from any device on the same LAN, not
-  just the phone itself.
+  just the phone itself. A biometric (or device PIN/pattern) lock guards the
+  app itself on launch/resume.
 
 **Setup:**
 1. Create a second Google Cloud service account (steps 3-4 of
@@ -521,7 +536,16 @@ over LAN. It's a deliberate scope cut, not a shrunk-down port:
    dashboard_credentials.json` (gitignored - never commit it).
 3. List whoever you want to view in `android/app/src/main/python/
    users_config.json`.
-4. From `android/`: `.\gradlew.bat assembleDebug` - the APK lands at
+4. From `frontend/`: `npm run build` (same command as the desktop app -
+   there's no separate Android build step). Copy the output into both
+   places the Python side reads it from:
+   ```
+   cd frontend && npm run build
+   rm -rf ../android_dashboard/static/* ../android/app/src/main/python/static/*
+   cp -r dist/* ../android_dashboard/static/
+   cp -r dist/* ../android/app/src/main/python/static/
+   ```
+5. From `android/`: `.\gradlew.bat assembleDebug` - the APK lands at
    `android/app/build/outputs/apk/debug/app-debug.apk`. Install it, open it
    once (starts the foreground service), then visit `http://<phone's LAN
    IP>:8000` from any device on the same network.

@@ -11,6 +11,8 @@ import { Trash } from './pages/Trash';
 import { Settings } from './pages/Settings';
 import { Admin } from './pages/Admin';
 import { api } from './lib/api';
+import { useCapabilities } from './lib/useCapabilities';
+import { ModeToggle } from './components/ModeToggle';
 
 // Admin has no nav link to any of these, but the routes still exist - guard
 // them directly so typing/pasting a URL (or a stale tab) can't land the
@@ -31,26 +33,45 @@ function RequireAdmin({ children }: { children: React.ReactNode }) {
 }
 
 export function App() {
+  // Single frontend build, served as-is by both the desktop app and the
+  // Android read-only server (android_dashboard/server.py) - which routes/
+  // drawers/nav mount is decided here at runtime from that server's
+  // /api/sync/config, instead of shipping a second trimmed build+entry.
+  const { readOnly } = useCapabilities();
+
   return (
     <BrowserRouter>
       <div className="flex min-h-screen bg-background">
         <NavBar />
         {/* Rendered once, outside <Routes> - Ask's in-flight question and chat
             state must survive navigating between the left-nav tabs below, not
-            just clicking around within one page. */}
-        <TopRightDrawers />
+            just clicking around within one page. Ask/Logs need endpoints the
+            read-only server doesn't implement, so it gets just the theme
+            toggle in their place. */}
+        {readOnly ? (
+          <div className="fixed right-6 top-4 z-40"><ModeToggle /></div>
+        ) : (
+          <TopRightDrawers />
+        )}
         <main className="min-w-0 flex-1 px-6 py-8">
           <div className="mx-auto max-w-6xl">
-            <Routes>
-              <Route path="/" element={<RequireNonAdmin><Dashboard /></RequireNonAdmin>} />
-              <Route path="/transactions" element={<RequireNonAdmin><Transactions /></RequireNonAdmin>} />
-              <Route path="/import" element={<RequireNonAdmin><Import /></RequireNonAdmin>} />
-              <Route path="/compare" element={<RequireNonAdmin><Compare /></RequireNonAdmin>} />
-              <Route path="/conflicts" element={<RequireNonAdmin><Conflicts /></RequireNonAdmin>} />
-              <Route path="/trash" element={<RequireNonAdmin><Trash /></RequireNonAdmin>} />
-              <Route path="/settings" element={<RequireNonAdmin><Settings /></RequireNonAdmin>} />
-              <Route path="/admin" element={<RequireAdmin><Admin /></RequireAdmin>} />
-            </Routes>
+            {readOnly ? (
+              <Routes>
+                <Route path="/" element={<Dashboard />} />
+                <Route path="*" element={<Navigate to="/" replace />} />
+              </Routes>
+            ) : (
+              <Routes>
+                <Route path="/" element={<RequireNonAdmin><Dashboard /></RequireNonAdmin>} />
+                <Route path="/transactions" element={<RequireNonAdmin><Transactions /></RequireNonAdmin>} />
+                <Route path="/import" element={<RequireNonAdmin><Import /></RequireNonAdmin>} />
+                <Route path="/compare" element={<RequireNonAdmin><Compare /></RequireNonAdmin>} />
+                <Route path="/conflicts" element={<RequireNonAdmin><Conflicts /></RequireNonAdmin>} />
+                <Route path="/trash" element={<RequireNonAdmin><Trash /></RequireNonAdmin>} />
+                <Route path="/settings" element={<RequireNonAdmin><Settings /></RequireNonAdmin>} />
+                <Route path="/admin" element={<RequireAdmin><Admin /></RequireAdmin>} />
+              </Routes>
+            )}
           </div>
         </main>
       </div>
