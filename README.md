@@ -421,6 +421,13 @@ budget_tracker/
       components/       NavBar, TopRightDrawers (Ask/Logs), UserSwitcher, SyncStatus, chart cards, etc.
       lib/api.ts         typed fetch wrappers - one function per backend endpoint
     dist/                the built app FastAPI serves (generated, gitignored)
+  android_dashboard/     standalone, no dependency on backend/ - read-only dashboard
+                          logic (Sheets reading, totals, HTML view), testable on desktop
+                          before it's copied into android/
+  android/                a separate Android Studio project (Chaquopy: embeds
+                          CPython + this same read-only logic in a phone app,
+                          served over LAN) - see "Viewing your dashboard from
+                          your phone" below
 ```
 
 ## Importing the historical data (already done once)
@@ -471,6 +478,53 @@ unless you first clear `backend/data/sagnik.db`.
   `/api/*` calls to the backend on :8000 (configured in `vite.config.ts`).
   Changes to `.tsx`/`.css` files show up instantly. This is separate from
   what `run.bat` runs day to day (`npm run build`, served by FastAPI).
+
+## Viewing your dashboard from your phone
+
+A separate, much smaller Android app - **not** the desktop app itself, and
+**not** the React frontend - for glancing at your numbers from your phone
+over LAN. It's a deliberate scope cut, not a shrunk-down port:
+
+- **Read-only, by design and by construction.** No local database, no sync
+  engine, no write path in the code at all - `android/app/src/main/python/
+  android_dashboard/sheets_reader.py`'s `ReadOnlySheetsClient` only
+  implements `get_rows()`; there's no update/append/clear method to even
+  misuse. The real enforcement is Google's own: the service account backing
+  this app must be shared as **Viewer** (never Editor) on your spreadsheet,
+  a completely separate identity from the desktop sync's read-write one
+  (see `docs/service_account_setup.md` for that one; this needs its own,
+  same steps, Viewer instead of Editor).
+- **A small hand-written page, not the real frontend.** The React app
+  assumes the full backend API (transactions, categories, imports, the
+  works) - none of which exists here. `android/app/src/main/python/
+  server.py` instead renders a simple HTML dashboard (this month/year/
+  all-time totals, top categories) directly from parsed Sheet rows, plus a
+  `/dashboard` JSON endpoint if you'd rather build a native UI against it.
+- **Multi-user without any of the desktop app's multi-user machinery.**
+  Sharing is per-spreadsheet, not per-credential, so the same read-only
+  service account can be Viewer on several different people's spreadsheets
+  independently. `android/app/src/main/python/users_config.json` is just a
+  `{"name", "spreadsheet_id"}` list - no registry, no per-user database, no
+  passwords.
+- **Built with [Chaquopy](https://chaquo.com/chaquopy/)**, which embeds a
+  real CPython 3.13 inside the Android app and pip-installs `fastapi`/
+  `uvicorn`/`google-api-python-client`/`google-auth` at build time - the
+  server runs inside a foreground `Service` (survives backgrounding) bound
+  to `0.0.0.0:8000`, so it's reachable from any device on the same LAN, not
+  just the phone itself.
+
+**Setup:**
+1. Create a second Google Cloud service account (steps 3-4 of
+   `docs/service_account_setup.md`, same as the desktop one) and share your
+   spreadsheet with it as **Viewer**.
+2. Drop its downloaded key at `android/app/src/main/python/
+   dashboard_credentials.json` (gitignored - never commit it).
+3. List whoever you want to view in `android/app/src/main/python/
+   users_config.json`.
+4. From `android/`: `.\gradlew.bat assembleDebug` - the APK lands at
+   `android/app/build/outputs/apk/debug/app-debug.apk`. Install it, open it
+   once (starts the foreground service), then visit `http://<phone's LAN
+   IP>:8000` from any device on the same network.
 
 ## Running tests
 

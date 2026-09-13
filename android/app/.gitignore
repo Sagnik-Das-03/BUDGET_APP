@@ -1,0 +1,6 @@
+/build
+
+# The read-only Sheets service-account key - never commit this. See
+# src/main/python/server.py's module docstring for where it goes and how
+# to create one.
+/src/main/python/dashboard_credentials.json
