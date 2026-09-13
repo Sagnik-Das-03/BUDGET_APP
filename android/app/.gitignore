@@ -4,3 +4,9 @@
 # src/main/python/server.py's module docstring for where it goes and how
 # to create one.
 /src/main/python/dashboard_credentials.json
+
+# The LAN password's salted hash and the local SQLite mirror of Sheets data
+# (see android_dashboard/auth.py and local_db.py) - both per-install state,
+# neither should be committed.
+/src/main/python/auth_config.json
+/src/main/python/dashboard_cache.db

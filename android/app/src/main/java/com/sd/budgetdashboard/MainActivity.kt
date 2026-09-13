@@ -21,13 +21,23 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
+import com.chaquo.python.PyException
+import com.chaquo.python.Python
+import com.chaquo.python.android.AndroidPlatform
+import org.json.JSONArray
 import java.net.Inet4Address
 import java.net.NetworkInterface
 
@@ -40,14 +50,34 @@ class MainActivity : FragmentActivity() {
     // shouldn't land straight back on this screen unlocked.
     private val unlocked = mutableStateOf(false)
 
+    // The LAN password (see android_dashboard/auth.py) is separate from the
+    // biometric lock above: the biometric lock guards this control screen on
+    // the phone itself, the LAN password guards the actual HTTP server every
+    // other device on the Wi-Fi talks to. Server.py's middleware fails
+    // CLOSED until one is set, so this screen is shown ahead of the
+    // dashboard controls the very first time, and reachable again afterwards
+    // to change it.
+    private val passwordSet = mutableStateOf(false)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // Started here (not only in ServerService) so the password/viewer
+        // screens below work even before the server has ever been started -
+        // Chaquopy's interpreter is one process-wide instance either way.
+        if (!Python.isStarted()) {
+            Python.start(AndroidPlatform(this))
+        }
+
         setContent {
-            if (unlocked.value) {
-                ServerDashboard()
-            } else {
-                LockScreen(onUnlock = { authenticate() })
+            when {
+                !unlocked.value -> LockScreen(onUnlock = { authenticate() })
+                !passwordSet.value -> SetPasswordScreen(
+                    isChange = false,
+                    onSaved = { passwordSet.value = true },
+                    onCancel = null,
+                )
+                else -> ServerDashboard()
             }
         }
     }
@@ -76,7 +106,7 @@ class MainActivity : FragmentActivity() {
                 // their own app over a device they haven't configured a
                 // lock on yet.
                 Log.w("MainActivity", "Biometric/device-credential auth unavailable - skipping lock")
-                unlocked.value = true
+                onUnlocked()
             }
         }
     }
@@ -87,7 +117,7 @@ class MainActivity : FragmentActivity() {
             this, executor,
             object : BiometricPrompt.AuthenticationCallback() {
                 override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
-                    unlocked.value = true
+                    onUnlocked()
                 }
                 override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
                     // User cancelled, or too many failed attempts, etc. -
@@ -106,6 +136,11 @@ class MainActivity : FragmentActivity() {
             .setAllowedAuthenticators(allowedAuthenticators)
             .build()
         prompt.authenticate(promptInfo)
+    }
+
+    private fun onUnlocked() {
+        unlocked.value = true
+        passwordSet.value = isPasswordSetPy()
     }
 
     private fun startServer() {
@@ -140,11 +175,163 @@ class MainActivity : FragmentActivity() {
     }
 
     @Composable
+    fun SetPasswordScreen(isChange: Boolean, onSaved: () -> Unit, onCancel: (() -> Unit)?) {
+        var password by remember { mutableStateOf("") }
+        var confirm by remember { mutableStateOf("") }
+        var error by remember { mutableStateOf<String?>(null) }
+
+        Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+            Column(
+                modifier = Modifier.fillMaxSize().padding(24.dp),
+                verticalArrangement = Arrangement.Center,
+            ) {
+                Text(
+                    text = if (isChange) "Change LAN Password" else "Set a LAN Password",
+                    style = MaterialTheme.typography.headlineSmall,
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "Anyone on your Wi-Fi who knows this password can open your dashboard in a " +
+                        "browser. It's separate from unlocking this app, and required before the server " +
+                        "will respond to anything.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Spacer(modifier = Modifier.height(20.dp))
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it; error = null },
+                    label = { Text("New password") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = confirm,
+                    onValueChange = { confirm = it; error = null },
+                    label = { Text("Confirm password") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                error?.let {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(it, color = MaterialTheme.colorScheme.error)
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Button(onClick = {
+                        when {
+                            password.length < 4 -> error = "Password must be at least 4 characters"
+                            password != confirm -> error = "Passwords don't match"
+                            else -> try {
+                                setPasswordPy(password)
+                                onSaved()
+                            } catch (e: PyException) {
+                                error = e.message ?: "Couldn't save the password"
+                            }
+                        }
+                    }) { Text("Save") }
+                    if (onCancel != null) {
+                        Button(onClick = onCancel) { Text("Cancel") }
+                    }
+                }
+            }
+        }
+    }
+
+    @Composable
+    fun ManageViewersSection() {
+        var usersJson by remember { mutableStateOf(loadUsersJsonPy()) }
+        var name by remember { mutableStateOf("") }
+        var spreadsheetId by remember { mutableStateOf("") }
+        var error by remember { mutableStateOf<String?>(null) }
+
+        val userNames = remember(usersJson) {
+            val arr = JSONArray(usersJson)
+            (0 until arr.length()).map { i -> arr.getJSONObject(i).getString("name") }
+        }
+
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(20.dp)) {
+                Text("Viewers", style = MaterialTheme.typography.titleLarge)
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Anyone listed here shows up in the dashboard's profile switcher, each with " +
+                        "its own isolated local cache. The same reader account needs Viewer access on " +
+                        "their spreadsheet first (see README.md).",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                if (userNames.isEmpty()) {
+                    Text("No viewers yet.", style = MaterialTheme.typography.bodyMedium)
+                } else {
+                    userNames.forEach { u ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(u, style = MaterialTheme.typography.bodyLarge)
+                            TextButton(onClick = {
+                                try {
+                                    removeUserPy(u)
+                                    usersJson = loadUsersJsonPy()
+                                } catch (e: PyException) {
+                                    error = e.message ?: "Couldn't remove $u"
+                                }
+                            }) { Text("Remove") }
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = name, onValueChange = { name = it; error = null },
+                    label = { Text("Name") }, modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = spreadsheetId, onValueChange = { spreadsheetId = it; error = null },
+                    label = { Text("Spreadsheet ID") }, modifier = Modifier.fillMaxWidth(),
+                )
+                error?.let {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(it, color = MaterialTheme.colorScheme.error)
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                Button(onClick = {
+                    try {
+                        addUserPy(name, spreadsheetId)
+                        name = ""
+                        spreadsheetId = ""
+                        usersJson = loadUsersJsonPy()
+                    } catch (e: PyException) {
+                        error = e.message ?: "Couldn't add viewer"
+                    }
+                }) { Text("Add Viewer") }
+            }
+        }
+    }
+
+    @Composable
     fun ServerDashboard() {
-        var serverRunning by remember { mutableStateOf(false) }
+        // Read from ServerService.isRunning (not a local "did I just click
+        // Start" flag) so this reflects reality even after the Activity is
+        // recreated while the foreground service kept running - see that
+        // companion property's own comment for why a plain var is safe here.
+        var serverRunning by remember { mutableStateOf(ServerService.isRunning) }
+        var changingPassword by remember { mutableStateOf(false) }
+        val clipboard = LocalClipboardManager.current
 
         val ipAddress = remember {
             getLocalIpAddress()
+        }
+
+        if (changingPassword) {
+            SetPasswordScreen(
+                isChange = true,
+                onSaved = { changingPassword = false },
+                onCancel = { changingPassword = false },
+            )
+            return
         }
 
         Surface(
@@ -223,10 +410,16 @@ class MainActivity : FragmentActivity() {
 
                         Spacer(modifier = Modifier.height(4.dp))
 
-                        Text(
-                            text = "$ipAddress:8000",
-                            style = MaterialTheme.typography.headlineSmall
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "$ipAddress:8000",
+                                style = MaterialTheme.typography.headlineSmall,
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            TextButton(onClick = {
+                                clipboard.setText(AnnotatedString("http://$ipAddress:8000"))
+                            }) { Text("Copy") }
+                        }
 
                         Spacer(modifier = Modifier.height(4.dp))
 
@@ -236,6 +429,22 @@ class MainActivity : FragmentActivity() {
                         )
                     }
                 }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(20.dp)) {
+                        Text("LAN Password", style = MaterialTheme.typography.titleLarge)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("Required before the server will respond to anything on the network.")
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Button(onClick = { changingPassword = true }) { Text("Change Password") }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                ManageViewersSection()
 
                 Spacer(modifier = Modifier.height(24.dp))
 
@@ -269,6 +478,26 @@ class MainActivity : FragmentActivity() {
             }
         }
     }
+}
+
+private fun pyModule(name: String) = Python.getInstance().getModule(name)
+
+private fun isPasswordSetPy(): Boolean =
+    pyModule("android_dashboard.auth").callAttr("is_password_set").toBoolean()
+
+private fun setPasswordPy(password: String) {
+    pyModule("android_dashboard.auth").callAttr("set_password", password)
+}
+
+private fun loadUsersJsonPy(): String =
+    pyModule("android_dashboard.users_config").callAttr("load_users_json").toString()
+
+private fun addUserPy(name: String, spreadsheetId: String) {
+    pyModule("android_dashboard.users_config").callAttr("add_user", name, spreadsheetId)
+}
+
+private fun removeUserPy(name: String) {
+    pyModule("android_dashboard.users_config").callAttr("remove_user", name)
 }
 
 private fun getLocalIpAddress(): String {

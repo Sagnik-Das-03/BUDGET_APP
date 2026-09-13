@@ -18,10 +18,21 @@ class ServerService : Service() {
     companion object {
         private const val CHANNEL_ID = "server_channel"
         private const val NOTIFICATION_ID = 1001
+
+        // MainActivity.kt reads this to show the real state instead of a
+        // local "did I just click Start" flag, which goes stale (and
+        // disagrees with the still-running notification) the moment the
+        // Activity is recreated - e.g. reopening the app while the
+        // foreground service kept running in the background the whole
+        // time. Safe as a plain var: this service and MainActivity always
+        // share one process (no android:process override in the manifest).
+        var isRunning: Boolean = false
+            private set
     }
 
     override fun onCreate() {
         super.onCreate()
+        isRunning = true
 
         // Enter foreground immediately.
         createNotificationChannel()
@@ -62,6 +73,7 @@ class ServerService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        isRunning = false
     }
 
     private fun createNotificationChannel() {

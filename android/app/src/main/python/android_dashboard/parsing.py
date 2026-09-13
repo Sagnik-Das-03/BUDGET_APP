@@ -28,6 +28,11 @@ class Txn:
     amount: float
     transaction_type: str
     deleted: bool
+    # Not used by calculations.py (which only cares about date/category/
+    # amount/type) but needed for the Transactions/filters page - account is
+    # a filter facet there, notes is just displayed.
+    account: str = ""
+    notes: Optional[str] = None
 
 
 @dataclass
@@ -99,9 +104,11 @@ def parse_row(raw: list[str]) -> Optional[Txn]:
     category = _cell(raw, COL["Category"]) or "Other"
     description = _cell(raw, COL["Description"])
     transaction_id = _cell(raw, COL["Transaction ID"])
+    account = _cell(raw, COL["Account"]) or "Primary"
+    notes = _cell(raw, COL["Notes"]) or None
 
     return Txn(transaction_id=transaction_id, date=parsed_date, description=description, category=category,
-               amount=abs(parsed_amount), transaction_type=txn_type, deleted=deleted)
+               amount=abs(parsed_amount), transaction_type=txn_type, deleted=deleted, account=account, notes=notes)
 
 
 def parse_config(rows: list[list[str]]) -> Config:
