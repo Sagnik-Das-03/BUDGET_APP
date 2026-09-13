@@ -536,19 +536,16 @@ that build shows at runtime:
    dashboard_credentials.json` (gitignored - never commit it).
 3. List whoever you want to view in `android/app/src/main/python/
    users_config.json`.
-4. From `frontend/`: `npm run build` (same command as the desktop app -
-   there's no separate Android build step). Copy the output into both
-   places the Python side reads it from:
-   ```
-   cd frontend && npm run build
-   rm -rf ../android_dashboard/static/* ../android/app/src/main/python/static/*
-   cp -r dist/* ../android_dashboard/static/
-   cp -r dist/* ../android/app/src/main/python/static/
-   ```
-5. From `android/`: `.\gradlew.bat assembleDebug` - the APK lands at
-   `android/app/build/outputs/apk/debug/app-debug.apk`. Install it, open it
-   once (starts the foreground service), then visit `http://<phone's LAN
-   IP>:8000` from any device on the same network.
+4. From the repo root: `sync_android.bat` - builds the frontend (same
+   `npm run build` as the desktop app, there's no separate Android build)
+   and copies the output into both places the Python side reads it from
+   (`android_dashboard/static/` and `android/app/src/main/python/static/`).
+5. Open `android/` in Android Studio (or run `.\gradlew.bat assembleDebug`
+   from there) to build/install the APK - it lands at `android/app/build/
+   outputs/apk/debug/app-debug.apk`. Install it, open it once (starts the
+   foreground service), then visit `http://<phone's LAN IP>:8000` from any
+   device on the same network. Re-run `sync_android.bat` (then rebuild)
+   whenever the frontend changes.
 
 ## Running tests
 
