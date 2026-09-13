@@ -19,7 +19,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -29,6 +32,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -342,6 +346,7 @@ class MainActivity : FragmentActivity() {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
                     .padding(24.dp),
                 verticalArrangement = Arrangement.Top
             ) {
@@ -372,12 +377,42 @@ class MainActivity : FragmentActivity() {
                         Spacer(modifier = Modifier.height(12.dp))
 
                         Text(
-                            text = if (serverRunning) {
-                                "● Running"
-                            } else {
-                                "● Stopped"
-                            }
+                            text = if (serverRunning) "● Running" else "● Stopped",
+                            color = if (serverRunning) Color(0xFF2E7D32) else Color(0xFFC62828),
                         )
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            Button(
+                                onClick = {
+                                    startServer()
+                                    serverRunning = true
+                                },
+                                enabled = !serverRunning,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFF2E7D32),
+                                    contentColor = Color.White,
+                                ),
+                                modifier = Modifier.weight(1f),
+                            ) { Text("Start Server") }
+
+                            Button(
+                                onClick = {
+                                    stopServer()
+                                    serverRunning = false
+                                },
+                                enabled = serverRunning,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFFC62828),
+                                    contentColor = Color.White,
+                                ),
+                                modifier = Modifier.weight(1f),
+                            ) { Text("Stop Server") }
+                        }
                     }
                 }
 
@@ -448,34 +483,6 @@ class MainActivity : FragmentActivity() {
                 ManageViewersSection()
 
                 Spacer(modifier = Modifier.height(24.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-
-                    Button(
-                        onClick = {
-                            startServer()
-                            serverRunning = true
-                        },
-                        enabled = !serverRunning,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text("Start Server")
-                    }
-
-                    Button(
-                        onClick = {
-                            stopServer()
-                            serverRunning = false
-                        },
-                        enabled = serverRunning,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text("Stop Server")
-                    }
-                }
             }
         }
     }
