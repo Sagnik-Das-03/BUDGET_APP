@@ -6,6 +6,18 @@ import type {
   SpendingPattern, SyncConfig, SyncLogEntry, SyncStatus, Totals, Transaction, TrashedTransaction, TrendForRange,
   UserStats, ViewFilters,
 } from './types';
+import { lanAuthHeader } from './lanAuth';
+
+// Thrown by request() below - `status` lets a caller (LanPasswordGate, in
+// particular) distinguish a 401 needing the LAN password from any other
+// failure, without re-parsing the message text.
+export class ApiError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+  }
+}
 
 // Exported (not just used internally by `api` below) so the Android server's
 // own small endpoints (/users, /api/active_user - see UserSwitcher.tsx's
@@ -13,7 +25,7 @@ import type {
 // still get the same clean error-message handling instead of duplicating it.
 export async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(path, {
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...lanAuthHeader() },
     ...options,
   });
   if (!res.ok) {
@@ -27,7 +39,7 @@ export async function request<T>(path: string, options?: RequestInit): Promise<T
     } catch {
       // not JSON - fall back to the raw body text as-is
     }
-    throw new Error(message);
+    throw new ApiError(message, res.status);
   }
   const ct = res.headers.get('content-type') || '';
   return ct.includes('application/json') ? res.json() : (undefined as T);

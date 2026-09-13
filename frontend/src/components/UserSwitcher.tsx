@@ -9,33 +9,92 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 // The Android host (see android/app/src/main/python/server.py's
-// _install_viewer_routes) exposes just these two tiny routes for switching
-// which viewer's local database the rest of the API reads from - GET even
-// for the switch itself, since the read-only middleware blocks every other
-// HTTP method on this server and picking who to view isn't a write worth an
-// exception for. Kept as a separate, much simpler branch rather than
-// teaching the desktop flow below about a user shape it doesn't have.
+// _install_viewer_routes) publishes each viewer's desktop password hash
+// through the manifest (backend/app/sync/reports.py's
+// regenerate_viewer_manifest) - without checking it here too, the single
+// shared LAN password would be the only thing standing between anyone on
+// the Wi-Fi and EVERY viewer's data, not just the ones with their own
+// password. GET even for the switch itself, since the read-only middleware
+// blocks every other HTTP method on this server and picking who to view
+// isn't a write worth an exception for. Kept as a separate, much simpler
+// branch rather than teaching the desktop flow below about a user shape it
+// doesn't have.
 function ReadOnlyUserSwitcher() {
   const queryClient = useQueryClient();
-  const users = useQuery({ queryKey: ['users'], queryFn: () => request<{ name: string }[]>('/users') });
-  const active = useQuery({ queryKey: ['activeUser'], queryFn: () => request<{ name: string }>('/api/active_user') });
+  const users = useQuery({
+    queryKey: ['users'], queryFn: () => request<{ name: string; has_password: boolean }[]>('/users'),
+  });
+  const active = useQuery({
+    queryKey: ['activeUser'], queryFn: () => request<{ name: string }>('/api/active_user'),
+    retry: false, // a 404 here just means "nobody active yet" - not worth retrying
+  });
+
+  const [pendingName, setPendingName] = useState<string | null>(null);
+  const [switchPassword, setSwitchPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [switching, setSwitching] = useState(false);
 
   if (!users.data || users.data.length <= 1) return null;
 
-  async function select(name: string) {
-    await request(`/api/active_user/${encodeURIComponent(name)}`);
-    queryClient.invalidateQueries();
+  async function doSwitch(name: string, password: string) {
+    setSwitching(true);
+    setError(null);
+    try {
+      await request(`/api/active_user/${encodeURIComponent(name)}${password ? `?password=${encodeURIComponent(password)}` : ''}`);
+      queryClient.invalidateQueries();
+      setPendingName(null);
+      setSwitchPassword('');
+    } catch (e) {
+      setError((e as Error).message || 'Could not switch');
+    } finally {
+      setSwitching(false);
+    }
+  }
+
+  function select(name: string) {
+    const target = users.data?.find((u) => u.name === name);
+    setError(null);
+    if (target?.has_password) {
+      setPendingName(name);
+      setSwitchPassword('');
+    } else {
+      doSwitch(name, '');
+    }
   }
 
   return (
-    <div className="flex items-center gap-1.5">
-      <UserIcon className="size-3.5 shrink-0 text-muted-foreground" />
-      <Select value={active.data?.name} onValueChange={select}>
-        <SelectTrigger size="sm" className="h-7 flex-1 text-xs"><SelectValue /></SelectTrigger>
-        <SelectContent>
-          {users.data.map((u) => <SelectItem key={u.name} value={u.name}>{u.name}</SelectItem>)}
-        </SelectContent>
-      </Select>
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-center gap-1.5">
+        <UserIcon className="size-3.5 shrink-0 text-muted-foreground" />
+        <Select value={active.data?.name} onValueChange={select}>
+          <SelectTrigger size="sm" className="h-7 flex-1 text-xs"><SelectValue placeholder="Select a viewer" /></SelectTrigger>
+          <SelectContent>
+            {users.data.map((u) => <SelectItem key={u.name} value={u.name}>{u.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </div>
+      {pendingName && (
+        <div className="flex flex-col gap-1.5 rounded-md border p-2">
+          <p className="text-xs text-muted-foreground">Password for {pendingName}</p>
+          <Input
+            type="password"
+            className="h-7 text-xs"
+            autoFocus
+            value={switchPassword}
+            onChange={(e) => setSwitchPassword(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') doSwitch(pendingName, switchPassword); }}
+          />
+          <div className="flex gap-1.5">
+            <Button size="sm" className="h-7 flex-1 text-xs" disabled={switching} onClick={() => doSwitch(pendingName, switchPassword)}>
+              Switch
+            </Button>
+            <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => { setPendingName(null); setError(null); }}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
+      {error && <p className="text-xs text-destructive">{error}</p>}
     </div>
   );
 }

@@ -395,25 +395,33 @@ def regenerate_config_tab(session: Session, sheets: GoogleSheetsService, spreads
 
 
 def regenerate_viewer_manifest(sheets: GoogleSheetsService, manifest_spreadsheet_id: str) -> None:
-    """Publishes every onboarded user's name + spreadsheet_id to a dedicated
-    tab in a SEPARATE spreadsheet (settings.viewer_manifest_spreadsheet_id) -
-    the only way the Android read-only host learns which viewers exist (see
-    android/app/src/main/python/viewers.py's refresh_manifest()); the phone
-    has no "add viewer" UI of its own, onboarding a person only ever happens
-    here on desktop. Excludes the admin profile (no financial data of its
-    own, nothing to view) and anyone without a spreadsheet_id set yet
-    (nothing to pull). Takes no `session`/user-database `spreadsheet_id` -
-    this reads the registry (all users), not one user's own database."""
+    """Publishes every onboarded user's name + spreadsheet_id + password hash
+    to a dedicated tab in a SEPARATE spreadsheet
+    (settings.viewer_manifest_spreadsheet_id) - the only way the Android
+    read-only host learns which viewers exist (see android/app/src/main/
+    python/viewers.py's refresh_manifest()); the phone has no "add viewer"
+    UI of its own, onboarding a person only ever happens here on desktop.
+    Excludes the admin profile (no financial data of its own, nothing to
+    view) and anyone without a spreadsheet_id set yet (nothing to pull).
+    Takes no `session`/user-database `spreadsheet_id` - this reads the
+    registry (all users), not one user's own database.
+
+    The password hash (PBKDF2-HMAC-SHA256, salted - see
+    user_registry.py's _hash_password) is published as-is, never the
+    plaintext - same reasoning as storing it in the registry in the first
+    place. A user with no desktop password published an empty string, and
+    the phone then requires none to switch to them either, mirroring
+    UserRegistry.verify_password's own "no password = open" behavior."""
     grid: list[list] = []
-    header_rows0 = [(len(grid), 2)]
-    grid.append(["Name", "Spreadsheet ID"])
+    header_rows0 = [(len(grid), 3)]
+    grid.append(["Name", "Spreadsheet ID", "Password Hash"])
     for u in registry.list_users():
         if u["username"] == ADMIN_USERNAME:
             continue
         spreadsheet_id = u.get("spreadsheet_id")
         if not spreadsheet_id:
             continue
-        grid.append([u["username"], spreadsheet_id])
+        grid.append([u["username"], spreadsheet_id, u.get("password_hash", "")])
     _rewrite_tab(sheets, manifest_spreadsheet_id, "Viewers", grid, header_rows0, [], [])
 
 

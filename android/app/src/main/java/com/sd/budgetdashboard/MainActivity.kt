@@ -259,14 +259,36 @@ class MainActivity : FragmentActivity() {
         // their spreadsheet) only ever happens on the desktop app, which
         // publishes the list this reads (see backend/app/sync/reports.py's
         // regenerate_viewer_manifest) - there is deliberately no add/remove
-        // here, just "look" and "switch which one I'm looking at".
+        // here, just "look" and "switch which one I'm looking at". A viewer
+        // with a desktop password requires it here too (see viewers.py's
+        // activate_viewer) - otherwise the LAN password alone would let
+        // anyone on the Wi-Fi see every viewer, not just the ones without
+        // their own password.
         var viewersJson by remember { mutableStateOf(listViewersPy()) }
         var error by remember { mutableStateOf<String?>(null) }
         var active by remember { mutableStateOf<String?>(null) }
+        var pendingName by remember { mutableStateOf<String?>(null) }
+        var switchPassword by remember { mutableStateOf("") }
 
-        val viewerNames = remember(viewersJson) {
+        data class ViewerRow(val name: String, val hasPassword: Boolean)
+        val viewerRows = remember(viewersJson) {
             val arr = JSONArray(viewersJson)
-            (0 until arr.length()).map { i -> arr.getString(i) }
+            (0 until arr.length()).map { i ->
+                val obj = arr.getJSONObject(i)
+                ViewerRow(obj.getString("name"), obj.getBoolean("has_password"))
+            }
+        }
+
+        fun trySwitch(name: String, password: String) {
+            try {
+                activateViewerPy(name, password)
+                active = name
+                error = null
+                pendingName = null
+                switchPassword = ""
+            } catch (e: PyException) {
+                error = e.message ?: "Couldn't switch to $name"
+            }
         }
 
         Card(modifier = Modifier.fillMaxWidth()) {
@@ -279,29 +301,49 @@ class MainActivity : FragmentActivity() {
                     style = MaterialTheme.typography.bodySmall,
                 )
                 Spacer(modifier = Modifier.height(12.dp))
-                if (viewerNames.isEmpty()) {
+                if (viewerRows.isEmpty()) {
                     Text(
                         "No viewers yet - start the server once to pull the list, or check that a " +
                             "person has been onboarded on the desktop app.",
                         style = MaterialTheme.typography.bodyMedium,
                     )
                 } else {
-                    viewerNames.forEach { name ->
+                    viewerRows.forEach { row ->
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Text(name, style = MaterialTheme.typography.bodyLarge)
+                            Text(row.name, style = MaterialTheme.typography.bodyLarge)
                             TextButton(onClick = {
-                                try {
-                                    activateViewerPy(name)
-                                    active = name
-                                    error = null
-                                } catch (e: PyException) {
-                                    error = e.message ?: "Couldn't switch to $name"
+                                error = null
+                                if (row.hasPassword) {
+                                    pendingName = row.name
+                                    switchPassword = ""
+                                } else {
+                                    trySwitch(row.name, "")
                                 }
-                            }) { Text(if (active == name) "Viewing" else "View") }
+                            }) { Text(if (active == row.name) "Viewing" else "View") }
+                        }
+                    }
+                }
+                pendingName?.let { name ->
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Column(modifier = Modifier.padding(top = 4.dp)) {
+                        Text("Password for $name", style = MaterialTheme.typography.bodySmall)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        OutlinedTextField(
+                            value = switchPassword,
+                            onValueChange = { switchPassword = it },
+                            visualTransformation = PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Button(onClick = { trySwitch(name, switchPassword) }) { Text("Switch") }
+                            Button(onClick = { pendingName = null; error = null }) { Text("Cancel") }
                         }
                     }
                 }
@@ -499,8 +541,8 @@ private fun setPasswordPy(password: String) {
 private fun listViewersPy(): String =
     pyModule("viewers").callAttr("list_viewers_json").toString()
 
-private fun activateViewerPy(name: String) {
-    pyModule("viewers").callAttr("activate_viewer", name)
+private fun activateViewerPy(name: String, password: String) {
+    pyModule("viewers").callAttr("activate_viewer", name, password)
 }
 
 private fun getLocalIpAddress(): String {

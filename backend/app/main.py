@@ -94,9 +94,18 @@ def health():
 # ---------- serve the built React/Vite frontend ----------
 # Registered after /health and all /api/* routers so nothing above is shadowed.
 if FRONTEND_DIST.is_dir():
+    # On the Android host, the static bundle itself must load WITHOUT the
+    # LAN password - the React app renders its own shadcn password screen
+    # (see frontend/src/lib/lanAuth.ts) instead of the browser's native
+    # Basic Auth prompt, which only appears in response to a 401 on an
+    # already-loaded page. Desktop is unaffected (still gated by _auth when
+    # its own optional AUTH_ENABLED is on) - read_only_mode is always False
+    # there. The actual DATA (every /api/* router above) stays behind
+    # require_auth regardless; only the JS/CSS/HTML shell is exempt.
+    _static_deps = [] if settings.read_only_mode else _auth
     app.mount("/assets", StaticFiles(directory=str(FRONTEND_DIST / "assets")), name="frontend-assets")
 
-    @app.get("/{full_path:path}", dependencies=_auth)
+    @app.get("/{full_path:path}", dependencies=_static_deps)
     def spa(full_path: str):
         """Serves a real static file if one exists at that path (favicon.svg, etc.),
         otherwise falls back to index.html so React Router's client-side routes

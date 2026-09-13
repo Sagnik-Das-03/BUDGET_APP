@@ -42,9 +42,21 @@ def require_auth(credentials: HTTPBasicCredentials = Depends(security)) -> None:
         if result is None:
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="No password set yet")
         if not result:
+            # NOT "Basic" here on purpose: a browser shows its OWN native
+            # username/password dialog for ANY 401 whose WWW-Authenticate
+            # scheme is exactly "Basic" - including ones from fetch()/XHR,
+            # not just full-page loads - which would hijack the Android
+            # host's custom shadcn password screen (frontend/src/lib/
+            # lanAuth.ts) the moment it made its first request. The client
+            # still SENDS "Authorization: Basic ..." either way (that part
+            # is fixed by HTTPBasic's own parsing on the way in) - only the
+            # outgoing challenge scheme name differs, and only for this
+            # dynamic-password branch. The desktop's static branch below is
+            # untouched, so its own optional native-prompt behavior (when
+            # AUTH_ENABLED) is unaffected.
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized",
-                headers={"WWW-Authenticate": "Basic"},
+                headers={"WWW-Authenticate": "LanPassword"},
             )
         return
 
