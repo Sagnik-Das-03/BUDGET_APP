@@ -7,12 +7,12 @@ def _titles(sheets):
     return [s.title for s in sheets.get_sheets(SPREADSHEET_ID)]
 
 
-def test_orders_dated_tabs_newest_first_by_default(sheets):
+def test_orders_dated_tabs_newest_first_by_default(session, sheets):
     for title in ["Transactions", "Dashboard", "2026-04", "2026-05", "2026-06",
                   "Weekly Summary", "Yearly Summary", "Monthly Breakdown", "2025-12", "2026-01"]:
         sheets.ensure_sheet(SPREADSHEET_ID, title)
 
-    result = reorder_period_tabs(sheets, SPREADSHEET_ID)
+    result = reorder_period_tabs(session, sheets, SPREADSHEET_ID)
 
     assert result["reordered"] is True
     assert _titles(sheets) == [
@@ -21,32 +21,46 @@ def test_orders_dated_tabs_newest_first_by_default(sheets):
     ]
 
 
-def test_orders_dated_tabs_oldest_first_when_requested(sheets):
+def test_orders_dated_tabs_oldest_first_when_requested(session, sheets):
     for title in ["Transactions", "Dashboard", "2026-06", "2026-04", "2026-05"]:
         sheets.ensure_sheet(SPREADSHEET_ID, title)
 
-    result = reorder_period_tabs(sheets, SPREADSHEET_ID, descending=False)
+    result = reorder_period_tabs(session, sheets, SPREADSHEET_ID, descending=False)
 
     assert result["reordered"] is True
     assert _titles(sheets) == ["Transactions", "Dashboard", "2026-04", "2026-05", "2026-06"]
 
 
-def test_no_op_when_already_in_order(sheets):
+def test_no_op_when_already_in_order(session, sheets):
     for title in ["Transactions", "Dashboard", "Yearly Summary", "Monthly Breakdown", "Weekly Summary",
                   "2026-06", "2026-05", "2026-04"]:
         sheets.ensure_sheet(SPREADSHEET_ID, title)
 
-    result = reorder_period_tabs(sheets, SPREADSHEET_ID)
+    result = reorder_period_tabs(session, sheets, SPREADSHEET_ID)
 
     assert result == {"reordered": False}
 
 
-def test_leaves_a_custom_unrecognized_tab_at_the_end(sheets):
+def test_leaves_a_custom_unrecognized_tab_at_the_end(session, sheets):
     for title in ["Transactions", "Dashboard", "My Notes", "2026-05", "2026-04"]:
         sheets.ensure_sheet(SPREADSHEET_ID, title)
 
-    result = reorder_period_tabs(sheets, SPREADSHEET_ID)
+    result = reorder_period_tabs(session, sheets, SPREADSHEET_ID)
 
     assert result["reordered"] is True
     titles = _titles(sheets)
     assert titles == ["Transactions", "Dashboard", "2026-05", "2026-04", "My Notes"]
+
+
+def test_places_a_saved_views_tab_before_dated_tabs(session, sheets):
+    from app.repositories.saved_views import SavedViewRepository
+
+    SavedViewRepository(session).create("Personal Expenses", "{}")
+    session.commit()
+    for title in ["Transactions", "Dashboard", "2026-05", "2026-04", "Personal Expenses"]:
+        sheets.ensure_sheet(SPREADSHEET_ID, title)
+
+    result = reorder_period_tabs(session, sheets, SPREADSHEET_ID)
+
+    assert result["reordered"] is True
+    assert _titles(sheets) == ["Transactions", "Dashboard", "Personal Expenses", "2026-05", "2026-04"]

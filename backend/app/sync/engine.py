@@ -277,7 +277,8 @@ def run_sync_cycle(session: Session, sheets: GoogleSheetsService, spreadsheet_id
         # Runs after report regeneration so any dated tab created THIS cycle
         # (a newly-discovered period) is already present to be placed in order,
         # rather than staying out of place until the next cycle catches it.
-        summary["tab_order"] = periods_mod.reorder_period_tabs(sheets, spreadsheet_id, descending=tab_sort_descending)
+        summary["tab_order"] = periods_mod.reorder_period_tabs(
+            session, sheets, spreadsheet_id, descending=tab_sort_descending)
     except Exception as e:
         logger.exception("period tab reorder failed")
         sync_repo.log(f"Period tab reorder failed: {e}", LogLevel.error)

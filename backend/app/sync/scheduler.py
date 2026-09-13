@@ -161,7 +161,9 @@ def run_reorder_tabs_once() -> dict:
         return {"error": "sync already in progress"}
     try:
         sheets = _sheets_client()
-        return periods_mod.reorder_period_tabs(sheets, _current_spreadsheet_id, descending=_current_tab_sort_descending)
+        with session_scope() as session:
+            return periods_mod.reorder_period_tabs(
+                session, sheets, _current_spreadsheet_id, descending=_current_tab_sort_descending)
     except Exception as e:
         logger.exception("manual tab reorder crashed")
         return {"error": str(e)}

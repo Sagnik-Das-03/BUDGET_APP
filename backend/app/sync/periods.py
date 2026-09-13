@@ -3,7 +3,7 @@ import re
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import MonthlyPeriod, Transaction
+from app.models import MonthlyPeriod, SavedView, Transaction
 from app.sheets.adapter import GoogleSheetsService
 from app.utils import month_label_for
 from typing import Optional
@@ -38,7 +38,8 @@ def ensure_periods_for_transactions(session: Session) -> list[str]:
     return period_keys
 
 
-def reorder_period_tabs(sheets: GoogleSheetsService, spreadsheet_id: str, descending: bool = True) -> dict:
+def reorder_period_tabs(session: Session, sheets: GoogleSheetsService, spreadsheet_id: str,
+                         descending: bool = True) -> dict:
     """Re-sorts the dated (YYYY-MM) tabs left to right by period_key -
     newest first by default (descending=True), oldest first if False (see
     Settings' tab order control). A new period tab is always just appended
@@ -46,7 +47,9 @@ def reorder_period_tabs(sheets: GoogleSheetsService, spreadsheet_id: str, descen
     they drift into a jumbled, non-chronological order over time.
 
     Final layout: Transactions, Dashboard, Yearly Summary, Monthly
-    Breakdown, Weekly Summary, then every dated tab in the chosen order.
+    Breakdown, Weekly Summary, then each saved view's own tab (see
+    app/sync/reports.py's regenerate_saved_view_tab) in whatever order
+    SavedView rows come back in, then every dated tab in the chosen order.
     Any other, unrecognized tab (a user's own custom sheet) is left in its
     current relative position, appended after all of the above rather than
     disturbed."""
@@ -56,10 +59,11 @@ def reorder_period_tabs(sheets: GoogleSheetsService, spreadsheet_id: str, descen
     dated_titles = sorted((t for t in by_title if PERIOD_RE.match(t)), reverse=descending)
     front = [t for t in ("Transactions", "Dashboard", "Yearly Summary", "Monthly Breakdown", "Weekly Summary")
              if t in by_title]
-    placed = set(front) | set(dated_titles)
+    saved_view_titles = [v.name for v in session.scalars(select(SavedView)) if v.name in by_title]
+    placed = set(front) | set(saved_view_titles) | set(dated_titles)
     other = [s.title for s in all_sheets if s.title not in placed]
 
-    target_titles = front + dated_titles + other
+    target_titles = front + saved_view_titles + dated_titles + other
     target_ids = [by_title[t] for t in target_titles]
     current_ids = [s.sheet_id for s in all_sheets]
 
