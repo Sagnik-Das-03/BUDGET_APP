@@ -5,15 +5,13 @@ from app.config import settings
 # .litertlm files expected under settings.lite_llm_dir.
 MODEL_FILES = {
     "qwen3_0_6b": "Qwen3-0.6B.litertlm",
-    "qwen3_4b": "qwen3_4b_mixed_int4.litertlm",
-    "gemma_4_e2b": "gemma-4-E2B-it-web.litertlm",
+    "qwen3_4b": "qwen3_4b_mixed_int4.litertlm"
 }
 
 # Human-readable names for the UI (e.g. "which model is answering this?").
 MODEL_DISPLAY_NAMES = {
     "qwen3_0_6b": "Qwen3 0.6B",
-    "qwen3_4b": "Qwen3 4B (int4)",
-    "gemma_4_e2b": "Gemma 4 E2B",
+    "qwen3_4b": "Qwen3 4B (int4)"
 }
 
 # Router config: which model handles which AI task. query_parse (chat query
