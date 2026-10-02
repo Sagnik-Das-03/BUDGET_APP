@@ -2,13 +2,16 @@ from datetime import date as date_type
 
 import typer
 
+from app.config import settings
 from app.db import init_db, session_scope
 from app.dashboard import calculations as calc
 from app.models import TransactionType
 from app.repositories.accounts import AccountRepository
 from app.repositories.categories import CategoryRepository
 from app.repositories.transactions import TransactionRepository
+from app.sheets.adapter import GoogleSheetsService
 from app.sync import scheduler
+from app.sync.reports import restore_registry_from_backup
 from app.utils import period_key_for
 
 app = typer.Typer(help="Budget Tracker CLI")
@@ -78,6 +81,29 @@ def sync_now():
     _bootstrap()
     result = scheduler.run_once()
     typer.echo(result)
+
+
+@app.command("restore-registry")
+def restore_registry():
+    """Disaster recovery for a lost/corrupted backend/data/users_registry.json:
+    re-adds any user missing from it using the "Registry Backup" tab
+    (see app/sync/reports.py's regenerate_registry_backup/
+    restore_registry_from_backup) - reattaches their ORIGINAL .db file
+    (which survives on disk even when the registry listing it is gone)
+    rather than creating a new empty one. Never touches an entry that
+    already exists, so this is always safe to re-run."""
+    if not settings.viewer_manifest_spreadsheet_id:
+        typer.echo("VIEWER_MANIFEST_SPREADSHEET_ID is not set in .env - nothing to restore from.")
+        raise typer.Exit(1)
+    if not settings.google_service_account_key_path:
+        typer.echo("GOOGLE_SERVICE_ACCOUNT_KEY_PATH is not set in .env - can't read the backup.")
+        raise typer.Exit(1)
+    sheets = GoogleSheetsService(settings.google_service_account_key_path)
+    restored = restore_registry_from_backup(sheets, settings.viewer_manifest_spreadsheet_id)
+    if restored:
+        typer.echo(f"Restored {len(restored)} user(s): {', '.join(restored)}")
+    else:
+        typer.echo("Nothing to restore - every backed-up user is already in the registry.")
 
 
 @app.command("import-legacy")

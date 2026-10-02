@@ -19,7 +19,7 @@ from app.repositories.accounts import AccountRepository
 from app.sheets.adapter import GoogleSheetsService
 from app.sync import periods as periods_mod
 from app.sync.engine import compact_and_sort, run_sync_cycle
-from app.sync.reports import regenerate_viewer_manifest
+from app.sync.reports import regenerate_registry_backup, regenerate_viewer_manifest
 from app.user_registry import registry
 from typing import Optional
 
@@ -252,10 +252,17 @@ def set_spreadsheet_id(spreadsheet_id: str) -> str:
 
 
 def publish_viewer_manifest() -> None:
-    """Best-effort - a manifest publish failure (network hiccup, manifest
-    not configured yet) must never block the spreadsheet-id change itself
-    that triggered it. No-op when settings.viewer_manifest_spreadsheet_id
-    is empty (the feature is entirely opt-in)."""
+    """Best-effort - a publish failure (network hiccup, manifest not
+    configured yet) must never block the change (user created/removed,
+    password set, spreadsheet id changed) that triggered it. No-op when
+    settings.viewer_manifest_spreadsheet_id is empty (entirely opt-in).
+
+    Publishes BOTH tabs this one spreadsheet holds: "Viewers" (what the
+    Android host reads - excludes admin/no-spreadsheet users) and
+    "Registry Backup" (disaster recovery for users_registry.json itself -
+    see app/sync/reports.py's restore_registry_from_backup, includes
+    everyone). One spreadsheet, one setting, two purposes - not worth a
+    second setting just to separate them."""
     if not settings.viewer_manifest_spreadsheet_id:
         return
     try:
@@ -263,8 +270,9 @@ def publish_viewer_manifest() -> None:
         if sheets is None:
             return
         regenerate_viewer_manifest(sheets, settings.viewer_manifest_spreadsheet_id)
+        regenerate_registry_backup(sheets, settings.viewer_manifest_spreadsheet_id)
     except Exception:
-        logger.exception("Failed to publish the viewer manifest")
+        logger.exception("Failed to publish the viewer manifest / registry backup")
 
 
 def _migrate_legacy_spreadsheet_id(session) -> None:

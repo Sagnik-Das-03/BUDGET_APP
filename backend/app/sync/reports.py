@@ -425,6 +425,59 @@ def regenerate_viewer_manifest(sheets: GoogleSheetsService, manifest_spreadsheet
     _rewrite_tab(sheets, manifest_spreadsheet_id, "Viewers", grid, header_rows0, [], [])
 
 
+def regenerate_registry_backup(sheets: GoogleSheetsService, manifest_spreadsheet_id: str) -> None:
+    """A disaster-recovery backup of the WHOLE registry (users_registry.json)
+    to a second tab in the same manifest spreadsheet - unlike the "Viewers"
+    tab above, this includes EVERY user (admin included) and every field
+    needed to reconstruct a working registry entry (db_file, password_hash),
+    not just who's Android-viewable. users_registry.json is the one piece
+    of desktop state with no other backup: each user's own .db file
+    functions as its own Sheets-backed backup (see restore_registry_from_
+    backup()'s docstring for why that's NOT true of the registry itself).
+    Called from the same trigger points as regenerate_viewer_manifest()
+    (see app/sync/scheduler.py's publish_viewer_manifest())."""
+    grid: list[list] = []
+    header_rows0 = [(len(grid), 4)]
+    grid.append(["Username", "DB File", "Password Hash", "Spreadsheet ID"])
+    for u in registry.list_users():
+        grid.append([u["username"], u["db_file"], u.get("password_hash", ""), u.get("spreadsheet_id", "")])
+    _rewrite_tab(sheets, manifest_spreadsheet_id, "Registry Backup", grid, header_rows0, [], [])
+
+
+def restore_registry_from_backup(sheets: GoogleSheetsService, manifest_spreadsheet_id: str) -> list[str]:
+    """Disaster recovery for a lost/corrupted users_registry.json: reads
+    the "Registry Backup" tab (see regenerate_registry_backup() above) and
+    re-adds any username missing from the CURRENT registry, pointing at
+    their ORIGINAL db_file - this reattaches an orphaned .db file (which
+    survives on disk even when the registry listing it is gone) rather
+    than creating a new empty one, and restores their password hash as-is
+    (never re-hashed - see UserRegistry.restore_entry()). Never touches or
+    overwrites an entry that already exists. Returns the usernames it
+    actually restored, so a caller (e.g. the CLI) can report what happened.
+
+    This is the backup users_registry.json itself has never had: each
+    user's OWN data is already safe (it's just a mirror of their Google
+    Sheet, re-pullable), but the registry mapping "which username owns
+    which .db file, with which password" exists ONLY in that one local
+    JSON file until this backup existed."""
+    rows = sheets.get_rows(manifest_spreadsheet_id, "Registry Backup")
+    restored = []
+    for row in rows[1:]:  # row 0 is the header
+        if len(row) < 2 or not row[0] or not row[1]:
+            continue
+        username, db_file = row[0], row[1]
+        if registry.exists(username):
+            continue
+        entry = {"username": username, "db_file": db_file}
+        if len(row) >= 3 and row[2]:
+            entry["password_hash"] = row[2]
+        if len(row) >= 4 and row[3]:
+            entry["spreadsheet_id"] = row[3]
+        registry.restore_entry(entry)
+        restored.append(username)
+    return restored
+
+
 def regenerate_all(session: Session, sheets: GoogleSheetsService, spreadsheet_id: str) -> dict:
     regenerate_dashboard(session, sheets, spreadsheet_id)
     regenerate_config_tab(session, sheets, spreadsheet_id)

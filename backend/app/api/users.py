@@ -171,6 +171,7 @@ def set_password(username: str, payload: SetPasswordIn):
     if not registry.verify_password(username, payload.old_password or ""):
         raise HTTPException(403, "Incorrect current password")
     registry.set_password(username, payload.new_password)
+    publish_viewer_manifest()
     return {"updated": True}
 
 
@@ -183,6 +184,7 @@ def clear_password(username: str, admin_password: Optional[str] = Body(default=N
     if not registry.exists(username):
         raise HTTPException(404, f"User {username!r} not found")
     registry.clear_password(username)
+    publish_viewer_manifest()
     return {"updated": True}
 
 

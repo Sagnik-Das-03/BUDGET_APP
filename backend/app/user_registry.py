@@ -131,6 +131,23 @@ class UserRegistry:
             data["active"] = username
         self._save(data)
 
+    def restore_entry(self, entry: dict) -> None:
+        """Re-adds a user entry EXACTLY as given, including an already-
+        hashed password_hash - for disaster recovery only (see
+        app/sync/reports.py's restore_registry_from_backup), never for
+        normal user creation (use add_user(), which hashes a real
+        plaintext password itself; this would double-hash it). A no-op
+        guard against clobbering: refuses if that username already exists,
+        same as add_user()."""
+        username = entry["username"]
+        data = self._load()
+        if any(u["username"] == username for u in data["users"]):
+            raise ValueError(f"User {username!r} already exists")
+        data["users"].append(entry)
+        if not data.get("active"):
+            data["active"] = username
+        self._save(data)
+
     def set_spreadsheet_id(self, username: str, spreadsheet_id: str) -> None:
         """Denormalized copy of this user's spreadsheet id - the real source
         of truth is their own app_settings row (see app/sync/scheduler.py's
