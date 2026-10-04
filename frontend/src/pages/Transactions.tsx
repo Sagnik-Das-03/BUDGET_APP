@@ -310,7 +310,11 @@ export function Transactions() {
   const hasActiveFilters = !!(year || month || category.length || account.length || type || search);
 
 const saveView = useMutation({
-    mutationFn: (name: string) => api.createSavedView(name, currentFiltersSnapshot()),
+    // Saved views are category/type/search presets, not a snapshot frozen to
+    // whenever they were created - year/month are deliberately left out so
+    // applyView() always fills in the CURRENT month below, every time the
+    // view is used, not just the month it happened to be saved in.
+    mutationFn: (name: string) => api.createSavedView(name, { ...currentFiltersSnapshot(), year: '', month: '' }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['savedViews'] }),
   });
   function saveCurrentView(name: string) {
@@ -318,11 +322,17 @@ const saveView = useMutation({
   }
 
   function applyView(view: SavedView) {
-    setYear(view.filters.year); setMonth(view.filters.month);
+    // Always the CURRENT month, regardless of whatever year/month is stored
+    // on the view (older views saved before this change may still have one
+    // baked in) - a saved view is a reusable category/type filter, not a
+    // pin to a specific month.
+    const year = CURRENT_YEAR;
+    const month = CURRENT_MONTH;
+    setYear(year); setMonth(month);
     setCategory(view.filters.category); setCategoryExclude(view.filters.categoryExclude);
     setAccount(view.filters.account); setAccountExclude(view.filters.accountExclude);
     setType(view.filters.type); setSearch(view.filters.search);
-    setAppliedFilters(buildQueryParams(view.filters));
+    setAppliedFilters(buildQueryParams({ ...view.filters, year, month }));
     setSelected(new Set());
     setPage(1);
   }
