@@ -1,14 +1,15 @@
-import { monthBounds, monthLabel, weekBounds } from '../lib/dates';
+import { monthBounds, monthLabel, weekBounds, yearBounds } from '../lib/dates';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Input } from '@/components/ui/input';
 
-export type PeriodType = 'week' | 'month' | 'custom';
+export type PeriodType = 'week' | 'month' | 'year' | 'custom';
 
 export interface PeriodValue {
   type: PeriodType;
   week: string;
   month: string;
+  year: string;
   from: string;
   to: string;
 }
@@ -26,6 +27,9 @@ export function resolvePeriod(v: PeriodValue): ResolvedPeriod | null {
   }
   if (v.type === 'month' && v.month) {
     return { label: monthLabel(v.month), ...monthBounds(v.month) };
+  }
+  if (v.type === 'year' && v.year) {
+    return { label: v.year, ...yearBounds(v.year) };
   }
   if (v.type === 'custom' && v.from && v.to) {
     return { label: `${v.from} → ${v.to}`, date_from: v.from, date_to: v.to };
@@ -55,6 +59,7 @@ export function PeriodPicker({ title, value, onChange }: Props) {
         >
           <ToggleGroupItem value="week">Week</ToggleGroupItem>
           <ToggleGroupItem value="month">Month</ToggleGroupItem>
+          <ToggleGroupItem value="year">Year</ToggleGroupItem>
           <ToggleGroupItem value="custom">Custom range</ToggleGroupItem>
         </ToggleGroup>
         {value.type === 'week' && (
@@ -62,6 +67,12 @@ export function PeriodPicker({ title, value, onChange }: Props) {
         )}
         {value.type === 'month' && (
           <Input type="month" value={value.month} onChange={(e) => onChange({ ...value, month: e.target.value })} />
+        )}
+        {value.type === 'year' && (
+          <Input
+            type="number" inputMode="numeric" placeholder="YYYY" value={value.year}
+            onChange={(e) => onChange({ ...value, year: e.target.value })}
+          />
         )}
         {value.type === 'custom' && (
           <div className="flex items-center gap-2">

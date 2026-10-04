@@ -5,7 +5,7 @@ import type { EChartsOption } from 'echarts';
 import { ArrowDown, ArrowUp, ArrowUpDown, TrendingDown, TrendingUp } from 'lucide-react';
 import { api } from '../lib/api';
 import { fmtMoney, fmtPct } from '../lib/format';
-import { shiftMonthValue, thisMonthValue } from '../lib/dates';
+import { shiftMonthValue, shiftWeekValue, thisMonthValue, thisWeekValue } from '../lib/dates';
 import { PeriodPicker, resolvePeriod, type PeriodValue } from '../components/PeriodPicker';
 import { CompareRecapCard } from '../components/CompareRecapCard';
 import { usePalette } from '../lib/usePalette';
@@ -47,11 +47,21 @@ function DeltaCell({ a, b }: { a: number; b: number }) {
 }
 
 function monthPeriod(month: string): PeriodValue {
-  return { type: 'month', month, week: '', from: '', to: '' };
+  return { type: 'month', month, week: '', year: '', from: '', to: '' };
+}
+
+function weekPeriod(week: string): PeriodValue {
+  return { type: 'week', week, month: '', year: '', from: '', to: '' };
+}
+
+function yearPeriod(year: string): PeriodValue {
+  return { type: 'year', year, week: '', month: '', from: '', to: '' };
 }
 
 export function Compare() {
   const thisMonth = thisMonthValue();
+  const thisWeek = thisWeekValue();
+  const thisYear = String(new Date().getFullYear());
   const [periodA, setPeriodA] = useState<PeriodValue>(monthPeriod(thisMonth));
   const [periodB, setPeriodB] = useState<PeriodValue>(monthPeriod(shiftMonthValue(thisMonth, -1)));
   const [sortKey, setSortKey] = useState<SortKey>('delta');
@@ -60,9 +70,9 @@ export function Compare() {
   const t = chartTheme(isDark);
   const palette = usePalette();
 
-  function applyPreset(monthA: string, monthB: string) {
-    setPeriodA(monthPeriod(monthA));
-    setPeriodB(monthPeriod(monthB));
+  function applyPreset(a: PeriodValue, b: PeriodValue) {
+    setPeriodA(a);
+    setPeriodB(b);
   }
 
   function toggleSort(key: SortKey) {
@@ -187,11 +197,17 @@ export function Compare() {
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <span className="text-xs text-muted-foreground">Quick:</span>
-        <Button variant="outline" size="sm" onClick={() => applyPreset(thisMonth, shiftMonthValue(thisMonth, -1))}>
+        <Button variant="outline" size="sm" onClick={() => applyPreset(weekPeriod(thisWeek), weekPeriod(shiftWeekValue(thisWeek, -1)))}>
+          This week vs last week
+        </Button>
+        <Button variant="outline" size="sm" onClick={() => applyPreset(monthPeriod(thisMonth), monthPeriod(shiftMonthValue(thisMonth, -1)))}>
           This month vs last month
         </Button>
-        <Button variant="outline" size="sm" onClick={() => applyPreset(thisMonth, shiftMonthValue(thisMonth, -12))}>
+        <Button variant="outline" size="sm" onClick={() => applyPreset(monthPeriod(thisMonth), monthPeriod(shiftMonthValue(thisMonth, -12)))}>
           This month vs same month last year
+        </Button>
+        <Button variant="outline" size="sm" onClick={() => applyPreset(yearPeriod(thisYear), yearPeriod(String(Number(thisYear) - 1)))}>
+          This year vs last year
         </Button>
       </div>
 

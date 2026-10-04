@@ -36,14 +36,26 @@ export function weekBounds(weekValue: string): { date_from: string; date_to: str
   return { date_from: iso(monday), date_to: iso(sunday) };
 }
 
-export function thisWeekValue(): string {
-  const now = new Date();
-  const d = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
+function isoWeekValue(input: Date): string {
+  const d = new Date(Date.UTC(input.getUTCFullYear(), input.getUTCMonth(), input.getUTCDate()));
   const dayNum = d.getUTCDay() || 7;
   d.setUTCDate(d.getUTCDate() + 4 - dayNum); // nearest Thursday
   const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
   const weekNo = Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
   return `${d.getUTCFullYear()}-W${String(weekNo).padStart(2, '0')}`;
+}
+
+export function thisWeekValue(): string {
+  return isoWeekValue(new Date());
+}
+
+/** Shift a "YYYY-Www" value by `delta` whole weeks, recomputing the ISO week
+ * number rather than just subtracting - so crossing a year boundary (e.g.
+ * week 1 going back a week) lands on the correct week of the correct year. */
+export function shiftWeekValue(weekValue: string, delta: number): string {
+  const monday = new Date(`${weekBounds(weekValue).date_from}T00:00:00Z`);
+  monday.setUTCDate(monday.getUTCDate() + delta * 7);
+  return isoWeekValue(monday);
 }
 
 export function thisMonthValue(): string {
