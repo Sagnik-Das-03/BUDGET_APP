@@ -84,19 +84,34 @@ function computeTotals(rows: Transaction[]) {
   return { count: rows.length, income, expenses, net: income - expenses };
 }
 
+const _now = new Date();
+// Plain, non-zero-padded strings - matching what the Year input / month
+// <Select> already produce (see MONTHS.map's value={String(i + 1)} below),
+// not lib/dates.ts's thisMonthValue() "YYYY-MM" format.
+const CURRENT_YEAR = String(_now.getFullYear());
+const CURRENT_MONTH = String(_now.getMonth() + 1);
+
 export function Transactions() {
   const { readOnly } = useCapabilities();
   const queryClient = useQueryClient();
   const { confirm, dialog: confirmDialog } = useConfirmDialog();
-  const [year, setYear] = useState('');
-  const [month, setMonth] = useState('');
+  // Defaults to the current month (not all-time) - with potentially years of
+  // history, loading everything by default is slow and rarely what you want
+  // to see first. "Clear" (below) still resets to all-time, same as before.
+  const [year, setYear] = useState(CURRENT_YEAR);
+  const [month, setMonth] = useState(CURRENT_MONTH);
   const [category, setCategory] = useState<string[]>([]);
   const [categoryExclude, setCategoryExclude] = useState(false);
   const [account, setAccount] = useState<string[]>([]);
   const [accountExclude, setAccountExclude] = useState(false);
   const [type, setType] = useState('');
   const [search, setSearch] = useState('');
-  const [appliedFilters, setAppliedFilters] = useState({});
+  const [appliedFilters, setAppliedFilters] = useState(
+    buildQueryParams({
+      year: CURRENT_YEAR, month: CURRENT_MONTH, category: [], categoryExclude: false,
+      account: [], accountExclude: false, type: '', search: '',
+    }),
+  );
   const [showAddForm, setShowAddForm] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [newRows, setNewRows] = useState<NewRow[]>([emptyRow()]);
@@ -284,7 +299,10 @@ export function Transactions() {
     setCategory([]); setCategoryExclude(false);
     setAccount([]); setAccountExclude(false);
     setType(''); setSearch('');
-    setAppliedFilters({});
+    setAppliedFilters(buildQueryParams({
+      year: '', month: '', category: [], categoryExclude: false,
+      account: [], accountExclude: false, type: '', search: '',
+    }));
     setSelected(new Set());
     setPage(1);
   }
