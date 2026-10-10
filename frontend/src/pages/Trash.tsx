@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { RotateCcw, Trash2 } from 'lucide-react';
 import { api } from '../lib/api';
-import { fmtMoney } from '../lib/format';
+import { fmtMoneyExact } from '../lib/format';
 import { useConfirmDialog } from '../lib/useConfirmDialog';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -137,7 +137,7 @@ export function Trash() {
                 <TableCell>{t.category}</TableCell>
                 <TableCell>{t.account}</TableCell>
                 <TableCell>{t.transaction_type}</TableCell>
-                <TableCell className="text-right tabular-nums">{fmtMoney(t.amount)}</TableCell>
+                <TableCell className="text-right tabular-nums">{fmtMoneyExact(t.amount)}</TableCell>
                 <TableCell className="whitespace-nowrap text-sm text-muted-foreground">
                   {new Date(t.deleted_at).toLocaleDateString()}
                   {!t.can_permanently_delete && (

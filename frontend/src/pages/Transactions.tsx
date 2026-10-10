@@ -2,7 +2,7 @@ import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/rea
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, Lock, Pencil, Plus, Sparkles, Trash2, Unlock, X } from 'lucide-react';
 import { api } from '../lib/api';
-import { fmtMoney } from '../lib/format';
+import { fmtMoney, fmtMoneyExact } from '../lib/format';
 import { useLocalStorage } from '../lib/useLocalStorage';
 import { useConfirmDialog } from '../lib/useConfirmDialog';
 import type { SavedView, Transaction, ViewFilters } from '../lib/types';
@@ -753,7 +753,7 @@ const saveView = useMutation({
                   <TableCell>{t.category}</TableCell>
                   <TableCell>{t.account}</TableCell>
                   <TableCell>{t.transaction_type}</TableCell>
-                  <TableCell className="text-right tabular-nums">{fmtMoney(t.amount)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{fmtMoneyExact(t.amount)}</TableCell>
                   {!readOnly && (
                     <>
                       <TableCell><Badge variant={SYNC_VARIANT[t.sync_status] ?? 'secondary'}>{t.sync_status}</Badge></TableCell>
