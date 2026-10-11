@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   DndContext, type DragEndEvent, PointerSensor, closestCenter, useSensor, useSensors,
 } from '@dnd-kit/core';
@@ -6,12 +6,16 @@ import {
   SortableContext, arrayMove, horizontalListSortingStrategy, useSortable,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { Eye, EyeOff, GripVertical, Info, X } from 'lucide-react';
+import { Eye, EyeOff, GripVertical, Info, Maximize2, X } from 'lucide-react';
 import { useLocalStorage } from '../lib/useLocalStorage';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
+
+const MIN_TILE_WIDTH = 150;
+const MAX_TILE_WIDTH = 440;
 
 // Masked in place of the real value/sub-text while numbers are hidden - a
 // fixed string rather than something derived from the real value's length,
@@ -28,23 +32,51 @@ export interface KpiTileData {
 }
 
 function SortableTile({
-  tile, revealed, onHide,
+  tile, revealed, width, onHide, onMaximize, onResize, onResetWidth,
 }: {
   tile: KpiTileData;
   revealed: boolean;
+  width: number | undefined;
   onHide: (id: string) => void;
+  onMaximize: (tile: KpiTileData) => void;
+  onResize: (id: string, width: number) => void;
+  onResetWidth: (id: string) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: tile.id });
+  const cardRef = useRef<HTMLDivElement | null>(null);
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
+    flex: width ? `0 0 ${width}px` : undefined,
   };
+
+  function onResizeStart(e: React.MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX;
+    const startWidth = width ?? cardRef.current?.getBoundingClientRect().width ?? 190;
+    function onMove(ev: MouseEvent) {
+      const next = Math.min(MAX_TILE_WIDTH, Math.max(MIN_TILE_WIDTH, startWidth + (ev.clientX - startX)));
+      onResize(tile.id, next);
+    }
+    function onUp() {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    }
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }
+
   return (
     <Card
-      ref={setNodeRef}
+      ref={(node) => { setNodeRef(node); cardRef.current = node; }}
       style={style}
       className={cn(
-        'group relative min-w-[170px] flex-1 py-0 select-none',
+        'group relative min-w-[150px] flex-1 py-0 select-none',
         isDragging && 'opacity-40 shadow-lg',
       )}
       {...attributes}
@@ -71,6 +103,15 @@ function SortableTile({
             <button
               type="button"
               onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => { e.stopPropagation(); onMaximize(tile); }}
+              className="text-muted-foreground/0 transition-colors group-hover:text-muted-foreground/60 hover:text-foreground!"
+              aria-label={`Maximize ${tile.label} tile`}
+            >
+              <Maximize2 className="size-3.5" />
+            </button>
+            <button
+              type="button"
+              onPointerDown={(e) => e.stopPropagation()}
               onClick={(e) => { e.stopPropagation(); onHide(tile.id); }}
               className="text-muted-foreground/0 transition-colors group-hover:text-muted-foreground/60 hover:text-destructive!"
               aria-label={`Hide ${tile.label} tile`}
@@ -94,6 +135,18 @@ function SortableTile({
           </div>
         )}
       </CardContent>
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label={`Resize ${tile.label} tile`}
+        onPointerDown={(e) => e.stopPropagation()}
+        onMouseDown={onResizeStart}
+        onDoubleClick={(e) => { e.stopPropagation(); onResetWidth(tile.id); }}
+        title="Drag to resize, double-click to reset"
+        className="absolute inset-y-0 right-0 z-10 w-1.5 translate-x-1/2 cursor-col-resize touch-none group/resize"
+      >
+        <div className="mx-auto h-full w-px bg-transparent transition-colors group-hover/resize:bg-border group-active/resize:bg-primary" />
+      </div>
     </Card>
   );
 }
@@ -101,10 +154,12 @@ function SortableTile({
 export function KpiRow({ tiles }: { tiles: KpiTileData[] }) {
   const [order, setOrder] = useLocalStorage<string[]>('dashboard.kpiOrder', tiles.map((t) => t.id));
   const [hidden, setHidden] = useLocalStorage<string[]>('dashboard.kpiHidden', []);
+  const [widths, setWidths] = useLocalStorage<Record<string, number>>('dashboard.kpiWidths', {});
   // Deliberately NOT persisted - the whole point is that numbers start
   // masked every time the dashboard is opened (e.g. screen-sharing, or
   // someone glancing at your phone), not just once per device.
   const [revealed, setRevealed] = useState(false);
+  const [maximized, setMaximized] = useState<KpiTileData | null>(null);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
   const orderedIds = order.filter((id) => tiles.some((t) => t.id === id));
@@ -119,6 +174,15 @@ export function KpiRow({ tiles }: { tiles: KpiTileData[] }) {
   function unhideTile(id: string) {
     setHidden(hidden.filter((x) => x !== id));
   }
+  function resizeTile(id: string, width: number) {
+    setWidths({ ...widths, [id]: width });
+  }
+  function resetTileWidth(id: string) {
+    if (!(id in widths)) return;
+    const next = { ...widths };
+    delete next[id];
+    setWidths(next);
+  }
 
   function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event;
@@ -131,7 +195,7 @@ export function KpiRow({ tiles }: { tiles: KpiTileData[] }) {
   return (
     <>
       <div className="-mt-3.5 mb-4 flex flex-wrap items-center justify-between gap-2">
-        <p className="text-[11px] text-muted-foreground">↕ Drag tiles to reorder — your layout is remembered on this device.</p>
+        <p className="text-[11px] text-muted-foreground">↕ Drag to reorder, drag the right edge to resize — remembered on this device.</p>
         <Button variant="ghost" size="sm" className="h-7 gap-1.5 text-xs" onClick={() => setRevealed((r) => !r)}>
           {revealed ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
           {revealed ? 'Hide numbers' : 'Show numbers'}
@@ -156,11 +220,44 @@ export function KpiRow({ tiles }: { tiles: KpiTileData[] }) {
         <SortableContext items={visibleIds} strategy={horizontalListSortingStrategy}>
           <div className="mb-6 flex flex-wrap gap-4">
             {ordered.map((tile) => (
-              <SortableTile key={tile.id} tile={tile} revealed={revealed} onHide={hideTile} />
+              <SortableTile
+                key={tile.id}
+                tile={tile}
+                revealed={revealed}
+                width={widths[tile.id]}
+                onHide={hideTile}
+                onMaximize={setMaximized}
+                onResize={resizeTile}
+                onResetWidth={resetTileWidth}
+              />
             ))}
           </div>
         </SortableContext>
       </DndContext>
+
+      <Dialog open={!!maximized} onOpenChange={(open) => !open && setMaximized(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{maximized?.label}</DialogTitle>
+          </DialogHeader>
+          <div className="text-5xl font-bold tabular-nums">{revealed ? maximized?.value : MASK}</div>
+          {maximized?.sub && (
+            <div
+              className={cn(
+                'text-sm',
+                maximized.sub.className === 'met' && 'text-emerald-600 dark:text-emerald-400',
+                maximized.sub.className === 'behind' && 'text-destructive',
+                !maximized.sub.className && 'text-muted-foreground',
+              )}
+            >
+              {revealed ? maximized.sub.text : MASK}
+            </div>
+          )}
+          {maximized?.description && (
+            <p className="text-sm text-muted-foreground">{maximized.description}</p>
+          )}
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

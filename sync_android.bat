@@ -18,10 +18,11 @@ echo.
 echo There is only ONE frontend and ONE backend - this builds the frontend
 echo and copies both it and backend\app\ into the Android app, which hosts
 echo the real app read-only (see android\app\src\main\python\server.py).
-echo Build the APK yourself from Android Studio afterwards.
+echo Then it builds the debug APK itself and copies it into your Google
+echo Drive folder, so it's one step from here to installing it on your phone.
 echo.
 
-echo [1/3] Building frontend...
+echo [1/4] Building frontend...
 cd frontend
 call npm run build
 if errorlevel 1 (
@@ -34,7 +35,7 @@ if errorlevel 1 (
 cd ..
 
 echo.
-echo [2/3] Syncing frontend\dist into the Android app...
+echo [2/4] Syncing frontend\dist into the Android app...
 robocopy frontend\dist android\app\src\main\python\static /MIR /NFL /NDL /NJH >nul
 if errorlevel 8 (
     echo.
@@ -45,7 +46,7 @@ if errorlevel 8 (
 echo Done.
 
 echo.
-echo [3/3] Syncing backend\app into the Android app...
+echo [3/4] Syncing backend\app into the Android app...
 robocopy backend\app android\app\src\main\python\app /MIR /XF cli.py /XD __pycache__ /NFL /NDL /NJH >nul
 if errorlevel 8 (
     echo.
@@ -64,8 +65,47 @@ if not exist "android\app\src\main\python\dashboard_credentials.json" (
 )
 
 echo.
+echo [4/4] Building the debug APK and copying it to Google Drive...
+cd android
+call gradlew.bat assembleDebug
+if errorlevel 1 (
+    echo.
+    echo ERROR: Gradle build failed. See output above.
+    cd ..
+    pause
+    exit /b 1
+)
+cd ..
+
+set APK_SRC=android\app\build\outputs\apk\debug\app-debug.apk
+set DRIVE_DIR=G:\My Drive
+if not exist "%APK_SRC%" (
+    echo.
+    echo ERROR: Build reported success but %APK_SRC% wasn't found.
+    pause
+    exit /b 1
+)
+if not exist "%DRIVE_DIR%" (
+    echo.
+    echo WARNING: %DRIVE_DIR% doesn't exist - is Google Drive for desktop running?
+    echo The APK is still available locally at %APK_SRC%.
+    pause
+    exit /b 1
+)
+REM Single stable filename (not the hash-named frontend assets) so Drive
+REM sync treats every run as an update to the same file, not a new upload.
+copy /y "%APK_SRC%" "%DRIVE_DIR%\BudgetTracker-debug.apk" >nul
+if errorlevel 1 (
+    echo.
+    echo ERROR: Failed to copy the APK into %DRIVE_DIR%.
+    pause
+    exit /b 1
+)
+echo Done - %DRIVE_DIR%\BudgetTracker-debug.apk
+
+echo.
 echo ============================================
-echo  Sync complete - build the APK from Android Studio
+echo  Sync complete - APK built and copied to Google Drive
 echo ============================================
 echo.
 pause
