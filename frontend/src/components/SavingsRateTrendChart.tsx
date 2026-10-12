@@ -11,7 +11,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 // Net Savings / Income for every month on record - pure arithmetic, already
 // computed by monthly_breakdown() for the Dashboard's month/year dropdowns,
 // just plotted here as its own trend instead of a table of numbers.
-export function SavingsRateTrendChart({ rows }: { rows: MonthlyBreakdownRow[] | undefined }) {
+export function SavingsRateTrendChart({
+  rows, height = 280,
+}: { rows: MonthlyBreakdownRow[] | undefined; height?: number | string }) {
   const isDark = useIsDark();
   const t = chartTheme(isDark);
   const palette = usePalette();
@@ -53,7 +55,7 @@ export function SavingsRateTrendChart({ rows }: { rows: MonthlyBreakdownRow[] | 
         <CardTitle className="text-sm font-semibold">Monthly Savings Rate</CardTitle>
       </CardHeader>
       <CardContent>
-        <ReactECharts option={option} className="h-[280px] w-full" notMerge />
+        <ReactECharts option={option} className="w-full" style={{ height }} notMerge />
       </CardContent>
     </Card>
   );

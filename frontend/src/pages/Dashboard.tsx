@@ -23,11 +23,26 @@ import { useCapabilities } from '../lib/useCapabilities';
 import { useLocalStorage } from '../lib/useLocalStorage';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import type { ReactNode } from 'react';
+import { cloneElement, isValidElement, type ReactNode } from 'react';
 
 const RANGE_LABEL: Record<RangeKey, string> = {
   this_week: 'This Week', this_month: 'This Month', this_year: 'This Year', all_time: 'All Time',
 };
+
+// Cards whose own chart has a fixed pixel height baked in via a `height`
+// prop (the rest - CategoryTrends, CategoryConsistency, EssentialSplitCard -
+// have no chart to stretch, so the extra room from a full-screen dialog is
+// enough on its own). Maximizing clones the element with a much taller
+// height so "full screen" means the chart itself fills the screen, not just
+// a bigger empty box around the same small chart.
+const CHARTS_WITH_HEIGHT_PROP = new Set(['trend', 'category', 'budget', 'spending-pattern', 'savings-rate-trend']);
+
+function cloneForMaximize(id: string, node: ReactNode): ReactNode {
+  if (CHARTS_WITH_HEIGHT_PROP.has(id) && isValidElement(node)) {
+    return cloneElement(node as React.ReactElement<{ height?: number | string }>, { height: 'calc(100vh - 220px)' });
+  }
+  return node;
+}
 
 export function Dashboard() {
   const { readOnly } = useCapabilities();
@@ -56,7 +71,7 @@ export function Dashboard() {
           delete next[id];
           setChartWidths(next);
         }}
-        onMaximize={() => setMaximizedChart({ id, node })}
+        onMaximize={() => setMaximizedChart({ id, node: cloneForMaximize(id, node) })}
       >
         {node}
       </ResizableChartCard>
@@ -311,7 +326,7 @@ export function Dashboard() {
       />
 
       <Dialog open={!!maximizedChart} onOpenChange={(open) => !open && setMaximizedChart(null)}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-4xl">
+        <DialogContent className="h-screen max-h-screen w-screen max-w-screen overflow-y-auto rounded-none sm:max-w-screen">
           <DialogHeader className="sr-only">
             <DialogTitle>Chart</DialogTitle>
           </DialogHeader>

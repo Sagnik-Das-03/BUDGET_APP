@@ -20,7 +20,7 @@ function rowLabel(row: TrendRow): string {
   return String(row.day ?? row.week_key ?? row.period_key ?? row.year ?? '');
 }
 
-export function TrendChart({ data }: { data: TrendForRange | undefined }) {
+export function TrendChart({ data, height = 340 }: { data: TrendForRange | undefined; height?: number | string }) {
   const [type, setType] = useLocalStorage('dashboard.chartType.trend', 'line');
   const isDark = useIsDark();
   const t = chartTheme(isDark);
@@ -67,7 +67,7 @@ export function TrendChart({ data }: { data: TrendForRange | undefined }) {
         />
       </CardHeader>
       <CardContent>
-        <ReactECharts option={option} className="w-full h-[340px]" notMerge />
+        <ReactECharts option={option} className="w-full" style={{ height }} notMerge />
       </CardContent>
     </Card>
   );

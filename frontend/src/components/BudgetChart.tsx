@@ -9,7 +9,7 @@ import { useIsDark } from '@/lib/useIsDark';
 import { chartTheme } from '@/lib/chartTheme';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
-export function BudgetChart({ rows }: { rows: BudgetVsActual[] | undefined }) {
+export function BudgetChart({ rows, height = 280 }: { rows: BudgetVsActual[] | undefined; height?: number | string }) {
   const [type, setType] = useLocalStorage('dashboard.chartType.budget', 'bar');
   const isDark = useIsDark();
   const t = chartTheme(isDark);
@@ -54,7 +54,7 @@ export function BudgetChart({ rows }: { rows: BudgetVsActual[] | undefined }) {
         />
       </CardHeader>
       <CardContent>
-        <ReactECharts option={option} className="w-full h-[280px]" notMerge />
+        <ReactECharts option={option} className="w-full" style={{ height }} notMerge />
       </CardContent>
     </Card>
   );

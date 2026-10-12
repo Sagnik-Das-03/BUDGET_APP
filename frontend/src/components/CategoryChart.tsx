@@ -20,7 +20,9 @@ const TYPE_OPTIONS = [
   { type: 'sunburst', label: 'Sunburst' },
 ];
 
-export function CategoryChart({ tree, rangeLabel }: { tree: CategoryDrilldownNode[] | undefined; rangeLabel: string }) {
+export function CategoryChart({
+  tree, rangeLabel, height = 280,
+}: { tree: CategoryDrilldownNode[] | undefined; rangeLabel: string; height?: number | string }) {
   const [type, setType] = useLocalStorage('dashboard.chartType.category', 'bar');
   const [selected, setSelected] = useState<string | null>(null);
   const isDark = useIsDark();
@@ -104,7 +106,8 @@ export function CategoryChart({ tree, rangeLabel }: { tree: CategoryDrilldownNod
       <CardContent>
         <ReactECharts
           option={option}
-          className="w-full h-[280px]"
+          className="w-full"
+          style={{ height }}
           notMerge
           onEvents={{ click: onEvents }}
         />

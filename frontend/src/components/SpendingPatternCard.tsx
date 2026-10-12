@@ -22,7 +22,7 @@ interface SpendingPatternCardProps {
 // Pure descriptive breakdown of WHEN expense spending happens within a week
 // and within a month - no AI, no threshold. Surfaces things like a
 // "weekend spender" pattern or spending front-loaded early in the month.
-export function SpendingPatternCard({ range, dateBounds }: SpendingPatternCardProps) {
+export function SpendingPatternCard({ range, dateBounds, height = 180 }: SpendingPatternCardProps & { height?: number | string }) {
   const isDark = useIsDark();
   const t = chartTheme(isDark);
   const palette = usePalette();
@@ -72,11 +72,11 @@ export function SpendingPatternCard({ range, dateBounds }: SpendingPatternCardPr
       <CardContent className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div>
           <p className="mb-1 text-xs text-muted-foreground">By day of week</p>
-          <ReactECharts option={dowOption} className="h-[180px] w-full" notMerge />
+          <ReactECharts option={dowOption} className="w-full" style={{ height }} notMerge />
         </div>
         <div>
           <p className="mb-1 text-xs text-muted-foreground">By part of the month</p>
-          <ReactECharts option={thirdOption} className="h-[180px] w-full" notMerge />
+          <ReactECharts option={thirdOption} className="w-full" style={{ height }} notMerge />
         </div>
       </CardContent>
     </Card>
