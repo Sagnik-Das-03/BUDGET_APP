@@ -57,7 +57,7 @@ export function TrendChart({ data }: { data: TrendForRange | undefined }) {
   }, [data, type, t, palette]);
 
   return (
-    <Card className="col-span-full">
+    <Card>
       <CardHeader className="flex-row items-center justify-between gap-2 space-y-0">
         <CardTitle className="text-sm font-semibold">{data ? GRANULARITY_TITLE[data.granularity] : 'Trend'}</CardTitle>
         <ChartTypeToggle

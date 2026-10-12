@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import {
   DndContext, type DragEndEvent, PointerSensor, closestCenter, useSensor, useSensors,
 } from '@dnd-kit/core';
@@ -13,13 +13,17 @@ export interface SortableGridItem {
   node: ReactNode;
   /** Extra classes on this item's own grid cell - e.g. "md:col-span-2" to span full width. */
   className?: string;
+  /** Inline style on this item's own flex/grid cell (the actual flex child
+   * dnd-kit animates) - e.g. a per-item flex-basis for drag-to-resize. Merged
+   * with (and overridable by) the drag transform this component sets itself. */
+  style?: CSSProperties;
 }
 
 function SortableTile({
-  id, handle, className, children,
-}: { id: string; handle: boolean; className?: string; children: ReactNode }) {
+  id, handle, className, style, children,
+}: { id: string; handle: boolean; className?: string; style?: CSSProperties; children: ReactNode }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
-  const style = { transform: CSS.Transform.toString(transform), transition };
+  const mergedStyle = { ...style, transform: CSS.Transform.toString(transform), transition };
 
   // Whole-tile dragging suits inert content (a KPI-style tile with just
   // text) - a dedicated grip handle is for tiles with their own interactive
@@ -28,7 +32,7 @@ function SortableTile({
   if (!handle) {
     return (
       <div
-        ref={setNodeRef} style={style} className={cn(isDragging && 'z-10 opacity-40', className)}
+        ref={setNodeRef} style={mergedStyle} className={cn(isDragging && 'z-10 opacity-40', className)}
         {...attributes} {...listeners}
       >
         {children}
@@ -37,7 +41,7 @@ function SortableTile({
   }
 
   return (
-    <div ref={setNodeRef} style={style} className={cn('group relative', isDragging && 'z-10 opacity-40 shadow-lg', className)}>
+    <div ref={setNodeRef} style={mergedStyle} className={cn('group relative', isDragging && 'z-10 opacity-40 shadow-lg', className)}>
       <button
         type="button"
         className="absolute right-2.5 top-2.5 z-10 cursor-grab rounded p-1 text-muted-foreground/0 transition-colors group-hover:text-muted-foreground/60 hover:bg-accent active:cursor-grabbing"
@@ -89,7 +93,9 @@ export function SortableGrid({ storageKey, items, className, handle = false }: S
       <SortableContext items={orderedIds} strategy={rectSortingStrategy}>
         <div className={className}>
           {ordered.map((item) => (
-            <SortableTile key={item.id} id={item.id} handle={handle} className={item.className}>{item.node}</SortableTile>
+            <SortableTile key={item.id} id={item.id} handle={handle} className={item.className} style={item.style}>
+              {item.node}
+            </SortableTile>
           ))}
         </div>
       </SortableContext>

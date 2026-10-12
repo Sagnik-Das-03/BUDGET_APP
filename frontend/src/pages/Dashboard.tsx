@@ -18,8 +18,12 @@ import { SpendingPatternCard } from '../components/SpendingPatternCard';
 import { SavingsRateTrendChart } from '../components/SavingsRateTrendChart';
 import { EssentialSplitCard } from '../components/EssentialSplitCard';
 import { SortableGrid } from '../components/SortableGrid';
+import { ResizableChartCard } from '../components/ResizableChartCard';
 import { useCapabilities } from '../lib/useCapabilities';
+import { useLocalStorage } from '../lib/useLocalStorage';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import type { ReactNode } from 'react';
 
 const RANGE_LABEL: Record<RangeKey, string> = {
   this_week: 'This Week', this_month: 'This Month', this_year: 'This Year', all_time: 'All Time',
@@ -30,6 +34,34 @@ export function Dashboard() {
   const [range, setRangeRaw] = useState<RangeKey>('this_month');
   const [selectedMonth, setSelectedMonthRaw] = useState<string | null>(null);
   const [selectedYear, setSelectedYearRaw] = useState<string | null>(null);
+  const [chartWidths, setChartWidths] = useLocalStorage<Record<string, number>>('dashboard.chartWidths', {});
+  const [maximizedChart, setMaximizedChart] = useState<{ id: string; node: ReactNode } | null>(null);
+
+  // `style` goes on the SortableGrid item itself (the actual flex child) -
+  // see ResizableChartCard's comment for why sizing a node nested inside it
+  // doesn't work. A stored drag width wins; otherwise `defaultWidth` (e.g.
+  // '100%' for a chart that should start full-width) or an even flex-1 share.
+  function chartItemStyle(id: string, defaultWidth?: string) {
+    const w = chartWidths[id];
+    return { flex: w ? `0 0 ${w}px` : defaultWidth ? `1 1 ${defaultWidth}` : '1 1 480px', minWidth: 340 };
+  }
+
+  function resizableChart(id: string, node: ReactNode) {
+    return (
+      <ResizableChartCard
+        onResize={(w) => setChartWidths({ ...chartWidths, [id]: w })}
+        onResetWidth={() => {
+          if (!(id in chartWidths)) return;
+          const next = { ...chartWidths };
+          delete next[id];
+          setChartWidths(next);
+        }}
+        onMaximize={() => setMaximizedChart({ id, node })}
+      >
+        {node}
+      </ResizableChartCard>
+    );
+  }
 
   function setRange(r: RangeKey) {
     setRangeRaw(r);
@@ -265,18 +297,27 @@ export function Dashboard() {
       <SortableGrid
         storageKey="dashboard.cardOrder"
         handle
-        className="grid grid-cols-1 gap-5 md:grid-cols-2"
+        className="flex flex-wrap gap-5"
         items={[
-          { id: 'trend', node: <TrendChart data={trend.data} /> },
-          { id: 'category', node: <CategoryChart tree={categoryTree.data} rangeLabel={categoryLabel} /> },
-          { id: 'budget', node: <BudgetChart rows={budget.data} /> },
-          { id: 'category-trends', node: <CategoryTrends range={effectiveRange} dateBounds={effectiveBounds} /> },
-          { id: 'category-consistency', node: <CategoryConsistency /> },
-          { id: 'spending-pattern', node: <SpendingPatternCard range={effectiveRange} dateBounds={effectiveBounds} /> },
-          { id: 'savings-rate-trend', node: <SavingsRateTrendChart rows={monthlyBreakdown.data} /> },
-          { id: 'essential-split', node: <EssentialSplitCard data={essentialSplit.data} />, className: 'md:col-span-2' },
+          { id: 'trend', node: resizableChart('trend', <TrendChart data={trend.data} />), style: chartItemStyle('trend', '100%') },
+          { id: 'category', node: resizableChart('category', <CategoryChart tree={categoryTree.data} rangeLabel={categoryLabel} />), style: chartItemStyle('category') },
+          { id: 'budget', node: resizableChart('budget', <BudgetChart rows={budget.data} />), style: chartItemStyle('budget') },
+          { id: 'category-trends', node: resizableChart('category-trends', <CategoryTrends range={effectiveRange} dateBounds={effectiveBounds} />), style: chartItemStyle('category-trends') },
+          { id: 'category-consistency', node: resizableChart('category-consistency', <CategoryConsistency />), style: chartItemStyle('category-consistency') },
+          { id: 'spending-pattern', node: resizableChart('spending-pattern', <SpendingPatternCard range={effectiveRange} dateBounds={effectiveBounds} />), style: chartItemStyle('spending-pattern') },
+          { id: 'savings-rate-trend', node: resizableChart('savings-rate-trend', <SavingsRateTrendChart rows={monthlyBreakdown.data} />), style: chartItemStyle('savings-rate-trend') },
+          { id: 'essential-split', node: resizableChart('essential-split', <EssentialSplitCard data={essentialSplit.data} />), style: chartItemStyle('essential-split', '100%') },
         ]}
       />
+
+      <Dialog open={!!maximizedChart} onOpenChange={(open) => !open && setMaximizedChart(null)}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-4xl">
+          <DialogHeader className="sr-only">
+            <DialogTitle>Chart</DialogTitle>
+          </DialogHeader>
+          {maximizedChart?.node}
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
