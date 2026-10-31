@@ -8,7 +8,7 @@ import { useLocalStorage } from '../lib/useLocalStorage';
 import { useIsDark } from '@/lib/useIsDark';
 import { chartTheme } from '@/lib/chartTheme';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Toggle } from '@/components/ui/toggle';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 
 // Net Savings / Income for every month on record - pure arithmetic, already
 // computed by monthly_breakdown() for the Dashboard's month/year dropdowns,
@@ -70,16 +70,18 @@ export function SavingsRateTrendChart({
 
   return (
     <Card>
-      <CardHeader className="flex-row items-center justify-between gap-2 space-y-0">
+      <CardHeader className="flex-col items-start gap-2 space-y-0">
         <CardTitle className="text-sm font-semibold">
           Monthly {rawAmount ? 'Net Savings' : 'Savings Rate'}
         </CardTitle>
-        <Toggle
-          size="sm" variant="outline" pressed={rawAmount} onPressedChange={setRawAmount}
-          aria-label="Plot raw rupee amount instead of savings rate percentage"
+        <ToggleGroup
+          type="single" variant="outline" size="sm"
+          value={rawAmount ? 'amount' : 'rate'}
+          onValueChange={(v) => v && setRawAmount(v === 'amount')}
         >
-          Abs
-        </Toggle>
+          <ToggleGroupItem value="rate" className="px-2.5 text-xs">Rate</ToggleGroupItem>
+          <ToggleGroupItem value="amount" className="px-2.5 text-xs">Amount</ToggleGroupItem>
+        </ToggleGroup>
       </CardHeader>
       <CardContent>
         <ReactECharts option={option} className="w-full" style={{ height }} notMerge />
