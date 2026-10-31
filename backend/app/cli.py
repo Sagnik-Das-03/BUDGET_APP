@@ -11,7 +11,7 @@ from app.repositories.categories import CategoryRepository
 from app.repositories.transactions import TransactionRepository
 from app.sheets.adapter import GoogleSheetsService
 from app.sync import scheduler
-from app.sync.reports import restore_registry_from_backup
+from app.sync.reports import apply_password_resets_from_backup, restore_registry_from_backup
 from app.utils import period_key_for
 
 app = typer.Typer(help="Budget Tracker CLI")
@@ -104,6 +104,29 @@ def restore_registry():
         typer.echo(f"Restored {len(restored)} user(s): {', '.join(restored)}")
     else:
         typer.echo("Nothing to restore - every backed-up user is already in the registry.")
+
+
+@app.command("reset-passwords")
+def reset_passwords():
+    """Password reset via Sheets, not a local file edit: clear a user's
+    Password Hash cell in the "Registry Backup" tab by hand (in Google
+    Sheets), then run this - it clears that same password locally, putting
+    the profile back to the open "no password set" state so a fresh one can
+    be set from Settings. Only acts where the Sheet cell is blank AND the
+    local registry still has a password for that user, so this is always
+    safe to re-run (nothing left to reset = no-op)."""
+    if not settings.viewer_manifest_spreadsheet_id:
+        typer.echo("VIEWER_MANIFEST_SPREADSHEET_ID is not set in .env - nothing to read resets from.")
+        raise typer.Exit(1)
+    if not settings.google_service_account_key_path:
+        typer.echo("GOOGLE_SERVICE_ACCOUNT_KEY_PATH is not set in .env - can't read the backup.")
+        raise typer.Exit(1)
+    sheets = GoogleSheetsService(settings.google_service_account_key_path)
+    reset = apply_password_resets_from_backup(sheets, settings.viewer_manifest_spreadsheet_id)
+    if reset:
+        typer.echo(f"Reset {len(reset)} user(s): {', '.join(reset)} - set a new password for them in Settings.")
+    else:
+        typer.echo("Nothing to reset - no blank Password Hash cell matches a user who still has one locally.")
 
 
 @app.command("import-legacy")

@@ -478,6 +478,36 @@ def restore_registry_from_backup(sheets: GoogleSheetsService, manifest_spreadshe
     return restored
 
 
+def apply_password_resets_from_backup(sheets: GoogleSheetsService, manifest_spreadsheet_id: str) -> list[str]:
+    """Password reset via the Sheet, not a local file edit: clear a user's
+    Password Hash cell in the "Registry Backup" tab (by hand, in Sheets) and
+    run this to clear it locally too - the profile goes back to the open
+    "no password set" state (see UserRegistry.verify_password's docstring),
+    same as any profile that's never had one, and a new password can be set
+    through Settings as usual. Deliberately the opposite of
+    restore_registry_from_backup()'s "never touch an existing entry" rule -
+    that one is disaster recovery for a LOST registry; this one is a
+    deliberate, explicit action gated by nothing but edit access to the
+    backup sheet, so it only ever acts on an explicit blank cell, never on
+    a missing row or a sheet read/parse failure.
+
+    Local-only: does NOT republish the backup tab afterward - it already
+    shows no password for this user (that's what triggered the reset), so
+    there's nothing to push back. Returns the usernames actually reset."""
+    rows = sheets.get_rows(manifest_spreadsheet_id, "Registry Backup")
+    reset = []
+    for row in rows[1:]:  # row 0 is the header
+        if not row or not row[0]:
+            continue
+        username = row[0]
+        sheet_hash = row[2] if len(row) >= 3 else ""
+        if sheet_hash or not registry.exists(username) or not registry.has_password(username):
+            continue
+        registry.clear_password(username)
+        reset.append(username)
+    return reset
+
+
 def regenerate_all(session: Session, sheets: GoogleSheetsService, spreadsheet_id: str) -> dict:
     regenerate_dashboard(session, sheets, spreadsheet_id)
     regenerate_config_tab(session, sheets, spreadsheet_id)
