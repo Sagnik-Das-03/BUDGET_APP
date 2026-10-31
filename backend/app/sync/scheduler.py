@@ -322,6 +322,33 @@ def clear_credentials_path() -> None:
     logger.info("Reverted the active user to the shared default credentials")
 
 
+def _recover_spreadsheet_id_from_registry(session) -> Optional[str]:
+    """Only the DEFAULT_USERNAME profile self-heals its spreadsheet id from
+    .env (see _migrate_legacy_spreadsheet_id) - every other profile's only
+    copy lived in this SAME per-user database, so deleting that .db file
+    (whether by accident or to test disaster recovery) silently stranded
+    sync with nothing to pull from, even though the file's own transactions
+    come back fine. The registry keeps its own denormalized copy of this
+    exact value (see UserRegistry.set_spreadsheet_id's docstring) purely for
+    the viewer manifest - reusing it here as a fallback, and writing it back
+    into app_settings so this recovery only ever has to happen once per
+    profile, is a one-line gap-closer we might as well have.
+    """
+    active = registry.get_active()
+    if not active:
+        return None
+    user = registry.get_user(active)
+    spreadsheet_id = user.get("spreadsheet_id") if user else None
+    if not spreadsheet_id:
+        return None
+    AppSettingRepository(session).set(SPREADSHEET_ID_KEY, spreadsheet_id)
+    logger.warning(
+        "Recovered %s's spreadsheet id from the registry - their own app_settings had none "
+        "(likely a deleted/recreated .db file)", active,
+    )
+    return spreadsheet_id
+
+
 def _load_settings_for_active_user() -> None:
     global _current_interval, _current_sort_descending, _current_tab_sort_descending
     global _current_spreadsheet_id, _current_credentials_path
@@ -331,7 +358,7 @@ def _load_settings_for_active_user() -> None:
         interval_override = repo.get(SYNC_INTERVAL_KEY)
         sort_override = repo.get(SHEET_SORT_DIRECTION_KEY)
         tab_sort_override = repo.get(PERIOD_TAB_SORT_DIRECTION_KEY)
-        spreadsheet_id = repo.get(SPREADSHEET_ID_KEY)
+        spreadsheet_id = repo.get(SPREADSHEET_ID_KEY) or _recover_spreadsheet_id_from_registry(session)
         credentials_path = repo.get(CREDENTIALS_PATH_KEY)
     _current_interval = max(int(interval_override), MIN_INTERVAL_SECONDS) if interval_override else settings.sync_interval_seconds
     _current_sort_descending = sort_override != "asc"

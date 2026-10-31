@@ -158,7 +158,24 @@ def session_for(db_file: str):
         tmp_engine.dispose()
 
 
+def _ensure_db_file_exists() -> None:
+    """Self-heals a .db file deleted out from under an ALREADY-RUNNING process
+    - not just one deleted while the app was closed, which _initial_db_path/
+    switch_active_db already handle naturally on the next startup/profile
+    switch. SQLite silently recreates an empty FILE at a missing path on the
+    next connection, but not the schema inside it, so without this the very
+    next query would fail with "no such table" (a 500) instead of just
+    finding nothing (an empty dashboard that the next sync cycle repopulates
+    from Sheets, same as a deletion caught at startup). Checked on every
+    get_session()/session_scope() call since the active profile can stay the
+    same for hours - this can happen at any moment, not just at startup."""
+    db_path = engine.url.database
+    if db_path and not Path(db_path).exists():
+        init_db()
+
+
 def get_session():
+    _ensure_db_file_exists()
     session = SessionLocal()
     try:
         yield session
@@ -168,6 +185,7 @@ def get_session():
 
 @contextmanager
 def session_scope():
+    _ensure_db_file_exists()
     session = SessionLocal()
     try:
         yield session

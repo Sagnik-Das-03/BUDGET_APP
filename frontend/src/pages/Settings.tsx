@@ -14,6 +14,15 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { ColorSwatchInput } from '@/components/ColorSwatchInput';
 
+// Lets pasting the whole Sheet URL work exactly like pasting the bare ID -
+// the ID is always the path segment right after "/d/". Anything that
+// doesn't match (already a bare ID, or some other string) passes through
+// unchanged rather than being mangled.
+function extractSpreadsheetId(input: string): string {
+  const match = input.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
+  return match ? match[1] : input;
+}
+
 export function Settings() {
   const queryClient = useQueryClient();
   const { confirm, dialog: confirmDialog } = useConfirmDialog();
@@ -257,19 +266,20 @@ export function Settings() {
         <CardContent className="flex flex-wrap items-center gap-2.5 border-b pb-4">
           <Label htmlFor="spreadsheet-id-input" className="text-sm">Spreadsheet ID</Label>
           <Input
-            id="spreadsheet-id-input" className="w-80" placeholder="e.g. 1dCcwuvIpMBvSjtQ2ghs..."
-            value={spreadsheetIdInput} onChange={(e) => setSpreadsheetIdInput(e.target.value)}
+            id="spreadsheet-id-input" className="w-80" placeholder="e.g. 1dCcwuvIpMBvSjtQ2ghs... or paste the full sheet URL"
+            value={spreadsheetIdInput} onChange={(e) => setSpreadsheetIdInput(extractSpreadsheetId(e.target.value))}
           />
           <Button
             size="sm" disabled={saveSpreadsheetId.isPending}
-            onClick={() => saveSpreadsheetId.mutate(spreadsheetIdInput.trim())}
+            onClick={() => saveSpreadsheetId.mutate(extractSpreadsheetId(spreadsheetIdInput).trim())}
           >
             Save
           </Button>
           {saveSpreadsheetId.isSuccess && <span className="text-sm text-green-600">Saved.</span>}
           <span className="w-full text-xs text-muted-foreground">
-            From the sheet's URL (the long ID between /d/ and /edit) - leave blank to turn sync off for this
-            profile. See docs/service_account_setup.md for sharing a sheet with the service account first.
+            Paste the sheet's full URL or just the ID (the long value between /d/ and /edit) - either works, a
+            pasted URL is trimmed down automatically. Leave blank to turn sync off for this profile. See
+            docs/service_account_setup.md for sharing a sheet with the service account first.
           </span>
         </CardContent>
         <CardContent className="flex flex-wrap items-center gap-2.5">
