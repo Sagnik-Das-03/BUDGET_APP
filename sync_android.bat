@@ -92,16 +92,31 @@ if not exist "%DRIVE_DIR%" (
     pause
     exit /b 1
 )
-REM Single stable filename (not the hash-named frontend assets) so Drive
-REM sync treats every run as an update to the same file, not a new upload.
-copy /y "%APK_SRC%" "%DRIVE_DIR%\BudgetTracker-debug.apk" >nul
+REM Each build gets its own timestamped filename (batch's %date%/%time% vary
+REM by Windows locale and can't be trusted to parse the same way on every
+REM machine, so PowerShell's Get-Date formats it instead) - lets you tell
+REM builds apart in Drive, e.g. if you need to grab a specific one later.
+for /f %%T in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd-HHmm"') do set BUILD_VERSION=%%T
+set APK_NAME=BudgetTracker-debug-%BUILD_VERSION%.apk
+
+copy /y "%APK_SRC%" "%DRIVE_DIR%\%APK_NAME%" >nul
 if errorlevel 1 (
     echo.
     echo ERROR: Failed to copy the APK into %DRIVE_DIR%.
     pause
     exit /b 1
 )
-echo Done - %DRIVE_DIR%\BudgetTracker-debug.apk
+echo Done - %DRIVE_DIR%\%APK_NAME%
+
+REM Only delete older builds AFTER the new one is confirmed in place, so a
+REM failed upload never leaves you with zero APKs in Drive. Keeps exactly
+REM one copy there at a time instead of accumulating one per sync run forever.
+for %%F in ("%DRIVE_DIR%\BudgetTracker-debug-*.apk") do (
+    if /i not "%%~nxF"=="%APK_NAME%" (
+        del /f /q "%%F"
+        echo Removed old build: %%~nxF
+    )
+)
 
 echo.
 echo ============================================
