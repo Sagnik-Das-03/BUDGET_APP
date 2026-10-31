@@ -4,11 +4,14 @@ from fastapi import APIRouter, Body, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
+from app.config import settings
 from app.db import create_empty_db, db_file_size, delete_db_file, session_for, switch_active_db
 from app.demo_data import seed_demo_data
 from app.models import Transaction
 from app.repositories.accounts import AccountRepository
 from app.repositories.categories import CategoryRepository
+from app.sheets.adapter import GoogleSheetsService
+from app.sync.reports import apply_password_resets_from_backup
 from app.sync.scheduler import publish_viewer_manifest
 from app.user_registry import ADMIN_USERNAME, registry
 
@@ -206,3 +209,26 @@ def delete_user(username: str, admin_password: Optional[str] = Body(default=None
     registry.remove_user(username)
     publish_viewer_manifest()
     return {"deleted": True}
+
+
+@router.post("/reset_passwords_from_sheets")
+def reset_passwords_from_sheets():
+    """Password reset via Sheets, not a password: clear a user's Password
+    Hash cell in the "Registry Backup" tab (see app/sync/reports.py's
+    apply_password_resets_from_backup) and call this - it clears that
+    password locally too, same effect as clear_password() above but reached
+    without knowing ANY password. Deliberately not gated by _require_admin()
+    - that's the exact lock this exists to recover from when it's ADMIN's
+    own password that's forgotten (clear_password on admin itself needs
+    admin's current password, which is the one thing you don't have). The
+    real gate is edit access to the backup spreadsheet, same trust level as
+    the equivalent `reset-passwords` CLI command."""
+    if not settings.viewer_manifest_spreadsheet_id:
+        raise HTTPException(503, "VIEWER_MANIFEST_SPREADSHEET_ID is not set in .env - nothing to read resets from.")
+    if not settings.google_service_account_key_path:
+        raise HTTPException(503, "GOOGLE_SERVICE_ACCOUNT_KEY_PATH is not set in .env - can't read the backup.")
+    sheets = GoogleSheetsService(settings.google_service_account_key_path)
+    reset = apply_password_resets_from_backup(sheets, settings.viewer_manifest_spreadsheet_id)
+    if reset:
+        publish_viewer_manifest()
+    return {"reset": reset}
