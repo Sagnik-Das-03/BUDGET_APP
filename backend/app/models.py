@@ -19,6 +19,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
+from app.money import MoneyPaise
 
 
 class TransactionType(str, enum.Enum):
@@ -98,7 +99,7 @@ class Budget(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     category_id: Mapped[int] = mapped_column(ForeignKey("categories.id"), nullable=False)
     period_key: Mapped[Optional[str]] = mapped_column(String(7), nullable=True)  # None = recurring monthly default
-    goal_amount: Mapped[float] = mapped_column(Float, nullable=False)
+    goal_amount: Mapped[float] = mapped_column(MoneyPaise, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     category: Mapped["Category"] = relationship()
@@ -111,7 +112,7 @@ class SavingsGoal(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     period_key: Mapped[Optional[str]] = mapped_column(String(7), nullable=True)  # None = recurring monthly default
-    goal_amount: Mapped[float] = mapped_column(Float, nullable=False)
+    goal_amount: Mapped[float] = mapped_column(MoneyPaise, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
@@ -134,7 +135,7 @@ class Transaction(Base):
 
     date: Mapped[date_type] = mapped_column(Date, nullable=False, index=True)
     description: Mapped[str] = mapped_column(String(255), nullable=False)
-    amount: Mapped[float] = mapped_column(Float, nullable=False)
+    amount: Mapped[float] = mapped_column(MoneyPaise, nullable=False)
     transaction_type: Mapped[TransactionType] = mapped_column(Enum(TransactionType), nullable=False)
 
     category_id: Mapped[int] = mapped_column(ForeignKey("categories.id"), nullable=False)
