@@ -148,6 +148,28 @@ class UserRegistry:
             data["active"] = username
         self._save(data)
 
+    def rename_user(self, old_username: str, new_username: str) -> None:
+        """Changes only the display name - db_file is an opaque identifier
+        (see app/api/users.py's create_user(), which no longer derives it
+        from the username) that never needs to change, so this never
+        touches any file on disk. Also updates `active` if the renamed
+        user is currently active, since that field stores a username, not
+        a db_file - leaving it stale would mean _initial_db_path() (app/
+        db.py) can't find the active user's entry on next startup and
+        silently falls back to the admin profile instead."""
+        self.validate_username(new_username)
+        data = self._load()
+        if not any(u["username"] == old_username for u in data["users"]):
+            raise ValueError(f"User {old_username!r} not found")
+        if old_username != new_username and any(u["username"] == new_username for u in data["users"]):
+            raise ValueError(f"User {new_username!r} already exists")
+        for u in data["users"]:
+            if u["username"] == old_username:
+                u["username"] = new_username
+        if data.get("active") == old_username:
+            data["active"] = new_username
+        self._save(data)
+
     def set_spreadsheet_id(self, username: str, spreadsheet_id: str) -> None:
         """Denormalized copy of this user's spreadsheet id - the real source
         of truth is their own app_settings row (see app/sync/scheduler.py's
@@ -182,16 +204,24 @@ class UserRegistry:
             data["active"] = data["users"][0]["username"] if data["users"] else None
         self._save(data)
 
-    def ensure_admin_exists(self) -> None:
+    def ensure_admin_exists(self) -> bool:
         """First-run bootstrap: if the registry doesn't exist yet, a brand
         new install starts with just the `admin` profile, active - admin has
         no financial data of its own, so a fresh install lands on an empty
         user-management screen rather than silently activating a named
         financial profile nobody has created yet. Create your own profile
-        from the Admin page from there."""
+        from the Admin page from there.
+
+        Returns True if this call actually created a fresh file (the
+        registry was missing entirely, not just missing some users) - see
+        app/db.py's REGISTRY_WAS_BOOTSTRAPPED and app/main.py's on_startup,
+        which use this to decide whether to attempt recovering the REAL
+        registry from the Sheets backup before settling for this bare
+        placeholder."""
         if self.path.exists():
-            return
+            return False
         self._save({"active": ADMIN_USERNAME, "users": [{"username": ADMIN_USERNAME, "db_file": f"{ADMIN_USERNAME}.db"}]})
+        return True
 
 
 registry = UserRegistry()

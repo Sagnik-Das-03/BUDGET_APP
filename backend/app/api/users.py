@@ -1,3 +1,4 @@
+import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Body, HTTPException
@@ -43,6 +44,11 @@ class ActivateIn(BaseModel):
 class SetPasswordIn(BaseModel):
     old_password: Optional[str] = None
     new_password: str = Field(min_length=4, max_length=128)
+
+
+class RenameUserIn(BaseModel):
+    new_username: str = Field(min_length=1, max_length=32, pattern=r"^[A-Za-z0-9_-]+$")
+    admin_password: Optional[str] = None
 
 
 class UserStatOut(BaseModel):
@@ -122,7 +128,11 @@ def create_user(payload: CreateUserIn):
     if registry.exists(payload.username):
         raise HTTPException(409, f"User {payload.username!r} already exists")
 
-    db_file = f"{payload.username.lower()}.db"
+    # Opaque, never derived from the username - renaming a user (see
+    # rename_user below) only ever touches the registry's display name,
+    # never a file on disk, and a username collision after a rename/delete
+    # can never collide with an old file left over from a different user.
+    db_file = f"{uuid.uuid4().hex}.db"
     # Seeded via a throwaway engine bound to the new file - this must NOT
     # touch the currently active user's engine/session, since creating a
     # user is not the same as switching into it.
@@ -176,6 +186,29 @@ def set_password(username: str, payload: SetPasswordIn):
     registry.set_password(username, payload.new_password)
     publish_viewer_manifest()
     return {"updated": True}
+
+
+@router.post("/{username}/rename")
+def rename_user(username: str, payload: RenameUserIn):
+    """Changes only the display name - the underlying db_file is an opaque
+    identifier (see create_user() above) that never changes, so this is a
+    pure registry edit, no file touched. Gated like create/delete (not
+    set_password/clear_password's own-account or admin-reset logic) since
+    this is an identity change, not a credential one. "admin" itself can't
+    be renamed - _require_admin()'s gate is hardcoded to that exact
+    username (ADMIN_USERNAME), so renaming it would silently disable the
+    gate for every future create/delete/rename instead of erroring."""
+    _require_admin(payload.admin_password)
+    if not registry.exists(username):
+        raise HTTPException(404, f"User {username!r} not found")
+    if username.lower() == ADMIN_USERNAME.lower():
+        raise HTTPException(409, "The admin account can't be renamed")
+    try:
+        registry.rename_user(username, payload.new_username)
+    except ValueError as e:
+        raise HTTPException(409, str(e)) from e
+    publish_viewer_manifest()
+    return {"renamed": True, "username": payload.new_username}
 
 
 @router.post("/{username}/clear_password")

@@ -46,12 +46,20 @@ def delete_db_file(db_file: str) -> None:
             candidate.unlink()
 
 
+# True only for the one process that found users_registry.json missing
+# entirely at startup and bootstrapped a bare placeholder for it - app/main.py's
+# on_startup() checks this to decide whether to attempt recovering the REAL
+# registry from the Sheets backup before settling for that placeholder.
+REGISTRY_WAS_BOOTSTRAPPED: bool = False
+
+
 def _initial_db_path() -> Path:
     """Which SQLite file this process opens at startup: the active user from
     the registry, bootstrapping the registry with just the `admin` profile
     on a truly fresh install (no registry file yet) - see
     UserRegistry.ensure_admin_exists."""
-    registry.ensure_admin_exists()
+    global REGISTRY_WAS_BOOTSTRAPPED
+    REGISTRY_WAS_BOOTSTRAPPED = registry.ensure_admin_exists()
     active = registry.get_active()
     db_file = registry.get_db_file(active) if active else None
     return _db_path_for(db_file or f"{ADMIN_USERNAME}.db")

@@ -213,6 +213,10 @@ export const api = {
     request<{ deleted: boolean }>(`/api/users/${encodeURIComponent(username)}`, {
       method: 'DELETE', body: JSON.stringify({ admin_password: adminPassword || null }),
     }),
+  renameUser: (username: string, newUsername: string, adminPassword?: string) =>
+    request<{ renamed: boolean; username: string }>(`/api/users/${encodeURIComponent(username)}/rename`, {
+      method: 'POST', body: JSON.stringify({ new_username: newUsername, admin_password: adminPassword || null }),
+    }),
   setUserPassword: (username: string, newPassword: string, oldPassword?: string) =>
     request<{ updated: boolean }>(`/api/users/${encodeURIComponent(username)}/set_password`, {
       method: 'POST', body: JSON.stringify({ new_password: newPassword, old_password: oldPassword || null }),

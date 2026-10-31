@@ -12,13 +12,18 @@ from app.api import (
 )
 from app.auth import require_auth
 from app.config import settings
-from app.db import init_db, session_scope
+from app import db
+from app.db import init_db, session_scope, switch_active_db
 from app.llm.router import llm_router
 from app.repositories.accounts import AccountRepository
 from app.repositories.categories import CategoryRepository
+from app.sheets.adapter import GoogleSheetsService
 from app.sync import scheduler
+from app.sync.reports import recover_registry_after_fresh_bootstrap
+from app.user_registry import registry
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+logger = logging.getLogger("budget_tracker.main")
 
 # Overridable so the Android host can point this at Chaquopy's app-private
 # storage, where the frontend build is copied to instead of a sibling of
@@ -62,12 +67,42 @@ app.include_router(saved_views.router, dependencies=_auth)
 app.include_router(users.router, dependencies=_auth)
 
 
-@app.on_event("startup")
-def on_startup() -> None:
-    init_db()
+def _ensure_defaults() -> None:
     with session_scope() as session:
         CategoryRepository(session).ensure_defaults()
         AccountRepository(session).ensure_default()
+
+
+@app.on_event("startup")
+def on_startup() -> None:
+    init_db()
+    _ensure_defaults()
+
+    # users_registry.json was missing ENTIRELY this run (not just missing a
+    # few users), so the engine above is bound to a bare, just-created
+    # "admin" placeholder - try recovering the REAL registry from the
+    # Sheets backup before settling for that placeholder. Best-effort: any
+    # failure (no network, nothing configured, backup tab doesn't exist
+    # yet) just leaves the placeholder in place, exactly like today.
+    if db.REGISTRY_WAS_BOOTSTRAPPED and settings.viewer_manifest_spreadsheet_id \
+            and settings.google_service_account_key_path:
+        try:
+            sheets = GoogleSheetsService(settings.google_service_account_key_path)
+            restored = recover_registry_after_fresh_bootstrap(sheets, settings.viewer_manifest_spreadsheet_id)
+            if restored:
+                logger.warning("Recovered registry from Sheets backup on fresh bootstrap: %s", restored)
+                new_active = registry.get_active()
+                new_db_file = registry.get_db_file(new_active) if new_active else None
+                # Only rebind if recovery actually changed who's active (it
+                # can, since removing the bare admin placeholder clears
+                # `active` until the next restored entry claims it) -
+                # switch_active_db() re-runs init_db() for the new file too.
+                if new_db_file and new_db_file != "admin.db":
+                    switch_active_db(new_db_file)
+                    _ensure_defaults()
+        except Exception:
+            logger.exception("Registry recovery from Sheets failed - continuing with the bare admin placeholder")
+
     # The Android host runs its OWN pull-only refresh loop (see
     # android/app/src/main/python/viewers.py) instead of this bidirectional
     # scheduler - there's nothing local to push (writes are blocked by

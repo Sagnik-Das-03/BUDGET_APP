@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
-import { KeyRound, Trash2 } from 'lucide-react';
+import { Check, KeyRound, Pencil, Trash2, X } from 'lucide-react';
 import { api } from '../lib/api';
 import { useConfirmDialog } from '../lib/useConfirmDialog';
 import { Button } from '@/components/ui/button';
@@ -36,6 +36,9 @@ export function Admin() {
   const [currentAdminPw, setCurrentAdminPw] = useState('');
   const [nextAdminPw, setNextAdminPw] = useState('');
 
+  const [renamingUser, setRenamingUser] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+
   function invalidateUserQueries() {
     queryClient.invalidateQueries({ queryKey: ['userStats'] });
     queryClient.invalidateQueries({ queryKey: ['users'] });
@@ -62,6 +65,15 @@ export function Admin() {
   const clearPassword = useMutation({
     mutationFn: (username: string) => api.clearUserPassword(username, adminPassword || undefined),
     onSuccess: invalidateUserQueries,
+  });
+
+  const rename = useMutation({
+    mutationFn: ({ username, newUsername }: { username: string; newUsername: string }) =>
+      api.renameUser(username, newUsername, adminPassword || undefined),
+    onSuccess: () => {
+      invalidateUserQueries();
+      setRenamingUser(null);
+    },
   });
 
   const admin = stats.data?.users.find((u) => u.username.toLowerCase() === 'admin');
@@ -92,6 +104,21 @@ export function Admin() {
       { title: 'Reset password', confirmLabel: 'Remove password' },
     );
     if (ok) clearPassword.mutate(username);
+  }
+
+  function startRename(username: string) {
+    setRenamingUser(username);
+    setRenameValue(username);
+    rename.reset();
+  }
+
+  function submitRename(username: string) {
+    const newUsername = renameValue.trim();
+    if (!newUsername || newUsername === username) {
+      setRenamingUser(null);
+      return;
+    }
+    rename.mutate({ username, newUsername });
   }
 
   const users = stats.data?.users ?? [];
@@ -142,16 +169,58 @@ export function Admin() {
                 {users.map((u) => (
                   <TableRow key={u.username}>
                     <TableCell className="font-medium">
-                      <div className="flex items-center gap-1.5">
-                        {u.username}
-                        {u.is_active && <Badge variant="secondary">active</Badge>}
-                      </div>
+                      {renamingUser === u.username ? (
+                        <div>
+                          <div className="flex items-center gap-1">
+                            <Input
+                              autoFocus value={renameValue} className="h-7 w-32"
+                              onChange={(e) => setRenameValue(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') submitRename(u.username);
+                                if (e.key === 'Escape') setRenamingUser(null);
+                              }}
+                            />
+                            <Button
+                              variant="ghost" size="icon" className="size-7 text-muted-foreground hover:text-foreground"
+                              disabled={rename.isPending} onClick={() => submitRename(u.username)}
+                              aria-label="Save new name"
+                            >
+                              <Check className="size-3.5" />
+                            </Button>
+                            <Button
+                              variant="ghost" size="icon" className="size-7 text-muted-foreground hover:text-destructive"
+                              onClick={() => setRenamingUser(null)} aria-label="Cancel rename"
+                            >
+                              <X className="size-3.5" />
+                            </Button>
+                          </div>
+                          {rename.isError && (
+                            <p className="mt-1 text-xs text-destructive">{(rename.error as Error).message}</p>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1.5">
+                          {u.username}
+                          {u.is_active && <Badge variant="secondary">active</Badge>}
+                        </div>
+                      )}
                     </TableCell>
                     <TableCell>{u.transaction_count}</TableCell>
                     <TableCell>{fmtBytes(u.db_size_bytes)}</TableCell>
                     <TableCell className="text-muted-foreground">{u.has_password ? 'Set' : '—'}</TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-1">
+                        {u.username.toLowerCase() !== 'admin' && (
+                          <Button
+                            variant="ghost" size="icon" className="text-muted-foreground hover:text-foreground"
+                            disabled={rename.isPending || renamingUser !== null}
+                            title={`Rename ${u.username}`}
+                            onClick={() => startRename(u.username)}
+                            aria-label={`Rename ${u.username}`}
+                          >
+                            <Pencil className="size-4" />
+                          </Button>
+                        )}
                         {u.has_password && (
                           <Button
                             variant="ghost" size="icon" className="text-muted-foreground hover:text-foreground"

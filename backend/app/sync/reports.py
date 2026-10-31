@@ -478,6 +478,39 @@ def restore_registry_from_backup(sheets: GoogleSheetsService, manifest_spreadshe
     return restored
 
 
+def recover_registry_after_fresh_bootstrap(sheets: GoogleSheetsService, manifest_spreadsheet_id: str) -> list[str]:
+    """Called once, only by app/main.py's on_startup() when app/db.py's
+    REGISTRY_WAS_BOOTSTRAPPED is True - i.e. users_registry.json was missing
+    ENTIRELY this run (UserRegistry.ensure_admin_exists() just created a
+    bare placeholder), not merely missing a few users (that's
+    restore_registry_from_backup()'s job as-is, already safe to call
+    anytime since it never touches an existing entry).
+
+    That placeholder's own bare "admin" entry (no password, no spreadsheet)
+    would otherwise block restoring the REAL admin row from the backup -
+    restore_registry_from_backup() never overwrites an existing entry - so
+    it's removed first, but ONLY if it's still in that exact just-
+    bootstrapped shape (the only user, no password, no spreadsheet) AND the
+    Sheets backup actually has its own admin row to replace it with. A
+    deliberately-configured admin with no password by choice is never at
+    risk: this only ever runs once, in the same startup tick the bare
+    placeholder was created.
+
+    Returns the usernames restored - app/main.py checks this to decide
+    whether the engine needs rebinding, since removing admin here can
+    change which user restore_registry_from_backup() lands on as active."""
+    rows = sheets.get_rows(manifest_spreadsheet_id, "Registry Backup")
+    sheet_has_admin_row = any(row and row[0] == ADMIN_USERNAME and len(row) >= 2 and row[1] for row in rows[1:])
+    admin = registry.get_user(ADMIN_USERNAME)
+    is_bare_bootstrap_admin = (
+        admin is not None and not admin.get("password_hash") and not admin.get("spreadsheet_id")
+        and len(registry.list_users()) == 1
+    )
+    if sheet_has_admin_row and is_bare_bootstrap_admin:
+        registry.remove_user(ADMIN_USERNAME)
+    return restore_registry_from_backup(sheets, manifest_spreadsheet_id)
+
+
 def apply_password_resets_from_backup(sheets: GoogleSheetsService, manifest_spreadsheet_id: str) -> list[str]:
     """Password reset via the Sheet, not a local file edit: clear a user's
     Password Hash cell in the "Registry Backup" tab (by hand, in Sheets) and
