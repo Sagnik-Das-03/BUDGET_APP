@@ -2,7 +2,7 @@ import ReactECharts from 'echarts-for-react';
 import { useMemo } from 'react';
 import type { EChartsOption } from 'echarts';
 import type { MonthlyBreakdownRow } from '../lib/types';
-import { fmtPct } from '../lib/format';
+import { fmtMoney, fmtPct } from '../lib/format';
 import { usePalette } from '../lib/usePalette';
 import { useLocalStorage } from '../lib/useLocalStorage';
 import { useIsDark } from '@/lib/useIsDark';
@@ -19,53 +19,64 @@ export function SavingsRateTrendChart({
   const isDark = useIsDark();
   const t = chartTheme(isDark);
   const palette = usePalette();
-  // Abs view answers "how big was the swing" regardless of direction - useful
-  // for spotting volatile months at a glance without a losing month's negative
-  // bar reading as smaller than it is. Off by default: sign (saved vs. lost)
-  // is the more important fact most of the time.
-  const [absValue, setAbsValue] = useLocalStorage('dashboard.savingsRateTrend.abs', false);
+  // Raw view plots the actual rupee Net Savings for the month instead of its
+  // share of income - useful when the % reading is misleading on its own
+  // (e.g. a tiny-income month swinging the rate wildly even though the real
+  // rupee amount barely moved). Off by default: the rate is the more usual
+  // thing to track month over month.
+  const [rawAmount, setRawAmount] = useLocalStorage('dashboard.savingsRateTrend.raw', false);
 
   const option = useMemo<EChartsOption>(() => {
     const data = rows ?? [];
-    const values = data.map((r) => (absValue ? Math.abs(r.savings_rate) : r.savings_rate));
+    const values = data.map((r) => (rawAmount ? r.net : r.savings_rate));
     return {
       backgroundColor: 'transparent',
       textStyle: { color: t.text },
       tooltip: {
         trigger: 'axis',
-        valueFormatter: (v) => fmtPct(v as number),
+        valueFormatter: (v) => (rawAmount ? fmtMoney(v as number) : fmtPct(v as number)),
         backgroundColor: t.tooltipBg,
         borderColor: t.tooltipBorder,
         textStyle: { color: t.text },
       },
-      grid: { left: 50, right: 20, top: 20, bottom: 40 },
+      grid: { left: 60, right: 20, top: 20, bottom: 40 },
       xAxis: {
         type: 'category', data: data.map((r) => r.period_key),
-        axisLabel: { rotate: 45, color: t.muted }, axisLine: { lineStyle: { color: t.grid } },
+        // 'auto' picks the widest spacing that still fits every label
+        // horizontally (dropping some rather than tilting them) - with many
+        // months on record, rotated text was harder to read than fewer,
+        // evenly-spaced, upright labels.
+        axisLabel: { color: t.muted, interval: 'auto' }, axisLine: { lineStyle: { color: t.grid } },
       },
       yAxis: {
-        type: 'value', axisLabel: { color: t.muted, formatter: (v: number) => `${(v * 100).toFixed(0)}%` },
+        type: 'value',
+        axisLabel: {
+          color: t.muted,
+          formatter: (v: number) => (rawAmount ? fmtMoney(v) : `${(v * 100).toFixed(0)}%`),
+        },
         splitLine: { lineStyle: { color: t.grid } },
       },
       series: [{
         type: 'line', data: values, smooth: true,
         areaStyle: { color: palette.net, opacity: 0.12 }, color: palette.net,
-        markLine: absValue ? undefined : {
+        markLine: {
           silent: true, symbol: 'none', lineStyle: { color: t.muted, type: 'dashed' }, data: [{ yAxis: 0 }],
         },
       }],
     };
-  }, [rows, t, palette, absValue]);
+  }, [rows, t, palette, rawAmount]);
 
   if (!rows || rows.length < 2) return null;
 
   return (
     <Card>
       <CardHeader className="flex-row items-center justify-between gap-2 space-y-0">
-        <CardTitle className="text-sm font-semibold">Monthly Savings Rate</CardTitle>
+        <CardTitle className="text-sm font-semibold">
+          Monthly {rawAmount ? 'Net Savings' : 'Savings Rate'}
+        </CardTitle>
         <Toggle
-          size="sm" variant="outline" pressed={absValue} onPressedChange={setAbsValue}
-          aria-label="Show absolute value"
+          size="sm" variant="outline" pressed={rawAmount} onPressedChange={setRawAmount}
+          aria-label="Plot raw rupee amount instead of savings rate percentage"
         >
           Abs
         </Toggle>
