@@ -24,6 +24,7 @@ class UserOut(BaseModel):
     is_active: bool
     db_size_bytes: int
     has_password: bool
+    tags: list[str] = []
 
 
 class CreateUserIn(BaseModel):
@@ -51,12 +52,17 @@ class RenameUserIn(BaseModel):
     admin_password: Optional[str] = None
 
 
+class SetTagsIn(BaseModel):
+    tags: list[str] = Field(default_factory=list, max_length=20)
+
+
 class UserStatOut(BaseModel):
     username: str
     is_active: bool
     db_size_bytes: int
     transaction_count: int
     has_password: bool
+    tags: list[str] = []
 
 
 class UserStatsOut(BaseModel):
@@ -87,6 +93,7 @@ def _to_out(entry: dict, active: str) -> UserOut:
     return UserOut(
         username=entry["username"], is_active=entry["username"] == active,
         db_size_bytes=db_file_size(entry["db_file"]), has_password=bool(entry.get("password_hash")),
+        tags=entry.get("tags", []),
     )
 
 
@@ -112,7 +119,7 @@ def user_stats():
         out.append(UserStatOut(
             username=u["username"], is_active=u["username"] == active,
             db_size_bytes=db_file_size(u["db_file"]), transaction_count=count,
-            has_password=bool(u.get("password_hash")),
+            has_password=bool(u.get("password_hash")), tags=u.get("tags", []),
         ))
     return UserStatsOut(
         total_users=len(out), total_size_bytes=sum(u.db_size_bytes for u in out),
@@ -209,6 +216,19 @@ def rename_user(username: str, payload: RenameUserIn):
         raise HTTPException(409, str(e)) from e
     publish_viewer_manifest()
     return {"renamed": True, "username": payload.new_username}
+
+
+@router.put("/{username}/tags")
+def set_tags(username: str, payload: SetTagsIn):
+    """Free-form organizational labels only (e.g. "family", "work") - never
+    read by any matching/filtering logic, purely for your own use in the
+    Admin page, so unlike rename/delete this isn't gated by the admin
+    password. Blanks are stripped and duplicates removed (see
+    UserRegistry.set_tags); an empty list clears them entirely."""
+    if not registry.exists(username):
+        raise HTTPException(404, f"User {username!r} not found")
+    registry.set_tags(username, payload.tags)
+    return {"tags": registry.get_user(username).get("tags", [])}
 
 
 @router.post("/{username}/clear_password")

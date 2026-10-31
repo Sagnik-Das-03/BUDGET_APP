@@ -170,6 +170,25 @@ class UserRegistry:
             data["active"] = new_username
         self._save(data)
 
+    def set_tags(self, username: str, tags: list[str]) -> None:
+        """Free-form labels (e.g. "family", "work") purely for your own
+        organization in the Admin page - never read by any matching/
+        filtering logic elsewhere, so there's no format to validate beyond
+        trimming blanks and de-duplicating. Stored as a plain list, omitted
+        from the entry entirely when empty rather than kept as `[]`, same
+        "absent means default" convention as spreadsheet_id above."""
+        data = self._load()
+        for u in data["users"]:
+            if u["username"] == username:
+                cleaned = list(dict.fromkeys(t.strip() for t in tags if t.strip()))
+                if cleaned:
+                    u["tags"] = cleaned
+                else:
+                    u.pop("tags", None)
+                self._save(data)
+                return
+        raise ValueError(f"User {username!r} not found")
+
     def set_spreadsheet_id(self, username: str, spreadsheet_id: str) -> None:
         """Denormalized copy of this user's spreadsheet id - the real source
         of truth is their own app_settings row (see app/sync/scheduler.py's

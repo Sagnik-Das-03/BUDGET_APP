@@ -217,6 +217,10 @@ export const api = {
     request<{ renamed: boolean; username: string }>(`/api/users/${encodeURIComponent(username)}/rename`, {
       method: 'POST', body: JSON.stringify({ new_username: newUsername, admin_password: adminPassword || null }),
     }),
+  setUserTags: (username: string, tags: string[]) =>
+    request<{ tags: string[] }>(`/api/users/${encodeURIComponent(username)}/tags`, {
+      method: 'PUT', body: JSON.stringify({ tags }),
+    }),
   setUserPassword: (username: string, newPassword: string, oldPassword?: string) =>
     request<{ updated: boolean }>(`/api/users/${encodeURIComponent(username)}/set_password`, {
       method: 'POST', body: JSON.stringify({ new_password: newPassword, old_password: oldPassword || null }),

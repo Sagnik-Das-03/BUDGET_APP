@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
-import { Check, KeyRound, Pencil, Trash2, X } from 'lucide-react';
+import { Check, KeyRound, Loader2, Pencil, Tag, Trash2, X } from 'lucide-react';
 import { api } from '../lib/api';
 import { useConfirmDialog } from '../lib/useConfirmDialog';
 import { Button } from '@/components/ui/button';
@@ -39,6 +39,9 @@ export function Admin() {
   const [renamingUser, setRenamingUser] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
 
+  const [editingTags, setEditingTags] = useState<string | null>(null);
+  const [tagsValue, setTagsValue] = useState('');
+
   function invalidateUserQueries() {
     queryClient.invalidateQueries({ queryKey: ['userStats'] });
     queryClient.invalidateQueries({ queryKey: ['users'] });
@@ -73,6 +76,14 @@ export function Admin() {
     onSuccess: () => {
       invalidateUserQueries();
       setRenamingUser(null);
+    },
+  });
+
+  const setTags = useMutation({
+    mutationFn: ({ username, tags }: { username: string; tags: string[] }) => api.setUserTags(username, tags),
+    onSuccess: () => {
+      invalidateUserQueries();
+      setEditingTags(null);
     },
   });
 
@@ -119,6 +130,17 @@ export function Admin() {
       return;
     }
     rename.mutate({ username, newUsername });
+  }
+
+  function startEditTags(username: string, currentTags: string[]) {
+    setEditingTags(username);
+    setTagsValue(currentTags.join(', '));
+    setTags.reset();
+  }
+
+  function submitTags(username: string) {
+    const tags = tagsValue.split(',').map((t) => t.trim()).filter(Boolean);
+    setTags.mutate({ username, tags });
   }
 
   const users = stats.data?.users ?? [];
@@ -173,7 +195,7 @@ export function Admin() {
                         <div>
                           <div className="flex items-center gap-1">
                             <Input
-                              autoFocus value={renameValue} className="h-7 w-32"
+                              autoFocus value={renameValue} className="h-7 w-32" disabled={rename.isPending}
                               onChange={(e) => setRenameValue(e.target.value)}
                               onKeyDown={(e) => {
                                 if (e.key === 'Enter') submitRename(u.username);
@@ -185,10 +207,13 @@ export function Admin() {
                               disabled={rename.isPending} onClick={() => submitRename(u.username)}
                               aria-label="Save new name"
                             >
-                              <Check className="size-3.5" />
+                              {rename.isPending
+                                ? <Loader2 className="size-3.5 animate-spin" />
+                                : <Check className="size-3.5" />}
                             </Button>
                             <Button
                               variant="ghost" size="icon" className="size-7 text-muted-foreground hover:text-destructive"
+                              disabled={rename.isPending}
                               onClick={() => setRenamingUser(null)} aria-label="Cancel rename"
                             >
                               <X className="size-3.5" />
@@ -203,6 +228,59 @@ export function Admin() {
                           {u.username}
                           {u.is_active && <Badge variant="secondary">active</Badge>}
                         </div>
+                      )}
+
+                      {editingTags === u.username ? (
+                        <div className="mt-1">
+                          <div className="flex items-center gap-1">
+                            <Input
+                              autoFocus value={tagsValue} className="h-7 w-40" disabled={setTags.isPending}
+                              placeholder="family, work, ..."
+                              onChange={(e) => setTagsValue(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') submitTags(u.username);
+                                if (e.key === 'Escape') setEditingTags(null);
+                              }}
+                            />
+                            <Button
+                              variant="ghost" size="icon" className="size-7 text-muted-foreground hover:text-foreground"
+                              disabled={setTags.isPending} onClick={() => submitTags(u.username)}
+                              aria-label="Save tags"
+                            >
+                              {setTags.isPending
+                                ? <Loader2 className="size-3.5 animate-spin" />
+                                : <Check className="size-3.5" />}
+                            </Button>
+                            <Button
+                              variant="ghost" size="icon" className="size-7 text-muted-foreground hover:text-destructive"
+                              disabled={setTags.isPending}
+                              onClick={() => setEditingTags(null)} aria-label="Cancel editing tags"
+                            >
+                              <X className="size-3.5" />
+                            </Button>
+                          </div>
+                          <p className="mt-1 text-xs text-muted-foreground">Comma-separated, just for your own organization.</p>
+                          {setTags.isError && (
+                            <p className="mt-1 text-xs text-destructive">{(setTags.error as Error).message}</p>
+                          )}
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          className="mt-1 flex flex-wrap items-center gap-1 text-left"
+                          onClick={() => startEditTags(u.username, u.tags)}
+                          aria-label={`Edit tags for ${u.username}`}
+                        >
+                          {u.tags.length
+                            ? u.tags.map((t) => (
+                              <Badge key={t} variant="outline" className="text-[10px] font-normal text-muted-foreground">
+                                {t}
+                              </Badge>
+                            ))
+                            : <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground/60 hover:text-muted-foreground">
+                              <Tag className="size-3" /> Add tags
+                            </span>}
+                        </button>
                       )}
                     </TableCell>
                     <TableCell>{u.transaction_count}</TableCell>

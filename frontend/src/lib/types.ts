@@ -3,6 +3,7 @@ export interface AppUser {
   is_active: boolean;
   db_size_bytes: number;
   has_password: boolean;
+  tags: string[];
 }
 
 export interface UserStat {
@@ -11,6 +12,7 @@ export interface UserStat {
   db_size_bytes: number;
   transaction_count: number;
   has_password: boolean;
+  tags: string[];
 }
 
 export interface UserStats {
