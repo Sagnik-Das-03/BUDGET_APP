@@ -2,9 +2,9 @@ import type {
   Account, AppUser, AskResponse, Budget, BudgetAlert, BudgetVsActual, Category, CategoryDrilldownNode,
   CategoryTotal, CategoryTrend, CategoryVolatility, ChartPalette, ChatMessage, ChatThread, ConflictRow,
   EssentialSplit, Highlights, ImportCommitResult, ImportPreviewResult, ImportRowIn, Insight, LlmStatus,
-  MonthlyBreakdownRow, QuickAddResult, SavedView, SavingsGoalProgress, SavingsStreak, SpendConcentration,
-  SpendingPattern, SyncConfig, SyncLogEntry, SyncStatus, Totals, Transaction, TrashedTransaction, TrendForRange,
-  UserStats, ViewFilters,
+  MonthlyBreakdownRow, QuickAddResult, RecurringIncomeSuggestion, SavedView, SavingsGoalProgress, SavingsStreak,
+  SpendConcentration, SpendingPattern, SyncConfig, SyncLogEntry, SyncStatus, Totals, Transaction,
+  TrashedTransaction, TrendForRange, UserStats, ViewFilters,
 } from './types';
 import { lanAuthHeader } from './lanAuth';
 
@@ -135,6 +135,9 @@ export const api = {
     request<{ deleted_count: number }>('/api/transactions/bulk_delete', { method: 'POST', body: JSON.stringify({ transaction_ids }) }),
   deletePendingTransactions: () =>
     request<{ hard_deleted: number; soft_deleted: number; total: number }>('/api/transactions/pending', { method: 'DELETE' }),
+  // A fixed amount (salary, say) recurring across 3+ distinct months that
+  // hasn't shown up yet this month - see the backend's missing_recurring_income.
+  recurringIncome: () => request<RecurringIncomeSuggestion[]>('/api/transactions/recurring_income'),
 
   // ---------- trash ----------
   listTrash: () => request<TrashedTransaction[]>('/api/transactions/trash'),

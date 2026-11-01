@@ -9,9 +9,10 @@ from app.models import Account, Category, SyncStatus, Transaction, TransactionTy
 from app.repositories.accounts import AccountRepository
 from app.repositories.categories import CategoryRepository
 from app.repositories.transactions import TransactionRepository
-from app.schemas import BulkCreateIn, BulkDeleteIn, TransactionIn, TransactionOut, TransactionTrashOut
+from app.schemas import BulkCreateIn, BulkDeleteIn, RecurringIncomeSuggestion, TransactionIn, TransactionOut, TransactionTrashOut
 from app.sync import scheduler
 from app.sync.engine import clear_sheet_rows
+from app.utils import period_key_for
 from typing import List, Optional
 
 router = APIRouter(prefix="/api/transactions", tags=["transactions"])
@@ -198,6 +199,20 @@ def delete_all_pending(session: Session = Depends(get_session)):
     result = TransactionRepository(session).delete_all_pending()
     session.commit()
     return result
+
+
+@router.get("/recurring_income", response_model=list[RecurringIncomeSuggestion])
+def recurring_income(session: Session = Depends(get_session)):
+    """One-click-away reminders for a recurring income (a monthly paycheck,
+    say) that hasn't shown up yet this month - see
+    TransactionRepository.missing_recurring_income for how "recurring" is
+    recognized (by amount across 3+ distinct months, since the description
+    itself is usually too irregular - "Paycheck September" vs "Paycheck
+    August 2026 (credited ...)" - to normalize the way suggest_from_rules
+    does for other recurring transactions). Registered before /{transaction_id}
+    so "recurring_income" isn't swallowed as an id, same reasoning as /pending above."""
+    current_period_key = period_key_for(date_type.today())
+    return TransactionRepository(session).missing_recurring_income(current_period_key)
 
 
 @router.put("/{transaction_id}", response_model=TransactionOut)

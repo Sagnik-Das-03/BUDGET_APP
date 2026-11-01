@@ -60,6 +60,15 @@ export interface TrashedTransaction extends Transaction {
   can_permanently_delete: boolean;
 }
 
+export interface RecurringIncomeSuggestion {
+  amount: number;
+  description: string;
+  category: string;
+  account: string;
+  last_date: string;
+  occurrences: number;
+}
+
 export interface Insight {
   insight: string;
   range: string;

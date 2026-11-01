@@ -58,6 +58,12 @@ def period_key_for(d: date_type) -> str:
     return f"{d.year:04d}-{d.month:02d}"
 
 
+def shift_period_key(period_key: str, delta_months: int) -> str:
+    year, month = (int(p) for p in period_key.split("-"))
+    total = year * 12 + (month - 1) + delta_months
+    return f"{total // 12:04d}-{total % 12 + 1:02d}"
+
+
 def month_label_for(period_key: str) -> str:
     year, month = period_key.split("-")
     month_names = ["January", "February", "March", "April", "May", "June",

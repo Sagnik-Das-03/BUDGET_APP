@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
 from app.models import Account, Category, SyncStatus, Transaction, TransactionSource, TransactionType
-from app.utils import content_hash, next_transaction_id, normalize_description, period_key_for, utcnow
+from app.utils import content_hash, next_transaction_id, normalize_description, period_key_for, shift_period_key, utcnow
 from typing import Optional
 
 # How many prior occurrences of a normalized description are needed before
@@ -142,6 +142,54 @@ class TransactionRepository:
 
         amounts = {round(t.amount, 2) for t in matches}
         return {"category": categories.pop(), "amount": amounts.pop() if len(amounts) == 1 else None}
+
+    def missing_recurring_income(self, current_period_key: str) -> list[dict]:
+        """A monthly paycheck's own description is too irregular to
+        normalize ("Paycheck September (01/10/26)" vs "Paycheck August 2026
+        (credited 02/09/2026)" - the month NAME itself varies, not just a
+        trailing date like suggest_from_rules handles) - so recurring INCOME
+        is recognized by amount instead: the same amount landing in 3+
+        DISTINCT months (one occurrence per month - two same-amount Income
+        rows in the SAME month count once, so a stray duplicate can't
+        inflate the count) is treated as a fixed recurring income, same
+        reasoning as a FIXED amount in suggest_from_rules.
+
+        Returns one entry per such amount that hasn't shown up yet in
+        current_period_key, each a template for a one-click "add it" -
+        description/account/category copied from its most recent real
+        occurrence. Skips an amount whose last occurrence isn't in either
+        of the two periods immediately before current_period_key - i.e. a
+        paycheck that's stopped recurring (job change, etc.) isn't
+        suggested forever just because it recurred 3+ times once."""
+        stmt = (
+            select(Transaction)
+            .options(joinedload(Transaction.category), joinedload(Transaction.account))
+            .where(Transaction.deleted_at.is_(None), Transaction.transaction_type == TransactionType.income)
+            .order_by(Transaction.date.desc(), Transaction.id.desc())
+        )
+        income = list(self.session.scalars(stmt))
+
+        by_amount: dict[float, list[Transaction]] = {}
+        for t in income:
+            by_amount.setdefault(round(t.amount, 2), []).append(t)
+
+        recent_period_keys = {shift_period_key(current_period_key, -1), shift_period_key(current_period_key, -2)}
+
+        suggestions = []
+        for amount, txns in by_amount.items():
+            months = {t.period_key for t in txns}
+            if len(months) < RECURRING_RULE_MIN_COUNT or current_period_key in months:
+                continue
+            latest = txns[0]  # already ordered by date desc
+            if latest.period_key not in recent_period_keys:
+                continue
+            suggestions.append({
+                "amount": amount, "description": latest.description,
+                "category": latest.category.name, "account": latest.account.name,
+                "last_date": latest.date, "occurrences": len(months),
+            })
+        suggestions.sort(key=lambda s: -s["amount"])
+        return suggestions
 
     def find_duplicates(self, *, date: date_type, amount: float, transaction_type: str) -> list[Transaction]:
         """Same date + type + amount (to the paisa) as an existing active transaction -

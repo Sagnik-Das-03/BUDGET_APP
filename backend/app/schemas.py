@@ -101,6 +101,15 @@ class CategorizeOut(BaseModel):
     amount: Optional[float] = None
 
 
+class RecurringIncomeSuggestion(BaseModel):
+    amount: float
+    description: str
+    category: str
+    account: str
+    last_date: date_type
+    occurrences: int
+
+
 class SuggestViewNameIn(BaseModel):
     category: list[str] = []
     category_exclude: bool = False

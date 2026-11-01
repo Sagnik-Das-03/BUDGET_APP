@@ -5,7 +5,7 @@ import { api } from '../lib/api';
 import { fmtMoney, fmtMoneyExact } from '../lib/format';
 import { useLocalStorage } from '../lib/useLocalStorage';
 import { useConfirmDialog } from '../lib/useConfirmDialog';
-import type { SavedView, Transaction, ViewFilters } from '../lib/types';
+import type { RecurringIncomeSuggestion, SavedView, Transaction, ViewFilters } from '../lib/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
@@ -162,6 +162,16 @@ export function Transactions() {
     queryFn: () => api.listTransactions(appliedFilters),
   });
 
+  // A fixed-amount income (salary, say) recurring 3+ months that hasn't
+  // shown up yet THIS month - naturally stops appearing once you've
+  // actually added it, no separate "dismiss" state needed. Read-only hosts
+  // (Android) never show it since they have no add-transaction form at all.
+  const recurringIncome = useQuery({
+    queryKey: ['recurringIncome'],
+    queryFn: () => api.recurringIncome(),
+    enabled: !readOnly,
+  });
+
   const deleteTxn = useMutation({
     mutationFn: (id: string) => api.deleteTransaction(id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['transactions'] }),
@@ -233,6 +243,18 @@ export function Transactions() {
   function updateRow(id: number, patch: Partial<NewRow>) {
     setNewRows((rows) => rows.map((r) => (r.id === id ? { ...r, ...patch } : r)));
   }
+  function addRecurringIncomeRow(s: RecurringIncomeSuggestion) {
+    setShowAddForm(true);
+    const row: NewRow = {
+      ...emptyRow(), description: s.description, amount: String(s.amount),
+      transaction_type: 'Income', category: s.category, account: s.account,
+      categoryTouched: true, amountTouched: true,
+    };
+    // A blank first row (nobody's typed into it yet) is replaced rather
+    // than appended to, so clicking the suggestion right after opening the
+    // page doesn't leave a pointless empty row sitting above it.
+    setNewRows((rows) => (rows.length === 1 && !rows[0].description && !rows[0].amount ? [row] : [...rows, row]));
+  }
   function addRow() {
     setNewRows((rows) => [...rows, emptyRow()]);
   }
@@ -288,6 +310,7 @@ export function Transactions() {
       setShowAddForm(false);
       setNewRows([emptyRow()]);
       queryClient.invalidateQueries({ queryKey: ['transactions'] });
+      queryClient.invalidateQueries({ queryKey: ['recurringIncome'] });
     },
   });
 
@@ -426,6 +449,26 @@ const saveView = useMutation({
           ? 'Every transaction across every month and year, in one place - viewing and editing happens in the main app.'
           : 'Every transaction across every month and year, in one place.'}
       </p>
+
+      {!readOnly && !!recurringIncome.data?.length && (
+        <div className="mb-5 flex flex-col gap-2">
+          {recurringIncome.data.map((s) => (
+            <div
+              key={`${s.amount}-${s.description}`}
+              className="flex flex-wrap items-center gap-2.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3.5 py-2.5 text-sm text-emerald-900 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-200"
+            >
+              <Sparkles className="size-4 shrink-0" />
+              <span>
+                Looks recurring: <strong>{fmtMoney(s.amount)}</strong> ({s.description}) — {s.occurrences} months
+                in a row, not recorded yet this month.
+              </span>
+              <Button size="sm" variant="outline" className="ml-auto" onClick={() => addRecurringIncomeRow(s)}>
+                Add it
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {!readOnly && (
         <div className="mb-3 flex flex-wrap items-center gap-2">
