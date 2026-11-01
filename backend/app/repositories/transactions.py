@@ -2,11 +2,16 @@ import json
 from datetime import date as date_type, datetime
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.models import Account, Category, SyncStatus, Transaction, TransactionSource, TransactionType
-from app.utils import content_hash, next_transaction_id, period_key_for, utcnow
+from app.utils import content_hash, next_transaction_id, normalize_description, period_key_for, utcnow
 from typing import Optional
+
+# How many prior occurrences of a normalized description are needed before
+# trusting it as a "rule" worth auto-filling from, rather than a coincidence -
+# see suggest_from_rules() below.
+RECURRING_RULE_MIN_COUNT = 3
 
 
 class TransactionRepository:
@@ -101,6 +106,42 @@ class TransactionRepository:
             .limit(1)
         )
         return self.session.scalar(stmt)
+
+    def suggest_from_rules(self, description: str) -> Optional[dict]:
+        """Recognizes a RECURRING transaction that category_for_description()'s
+        exact match misses - e.g. "Zomato (06/10/26)" vs "Zomato (07/11/26)",
+        the same merchant re-entered every time with a fresh date baked into
+        the description, which compare as two unrelated strings verbatim.
+        Normalizes away that trailing date (see normalize_description) and
+        looks for OTHER active transactions sharing the same normalized base,
+        appearing at least RECURRING_RULE_MIN_COUNT times with the SAME
+        category every time (an inconsistent history - e.g. "Swiggy" filed
+        under both Quick-Commerce and Food-Order - is treated as no rule at
+        all, not a guess at the majority).
+
+        Returns None if no rule applies, else {"category": str, "amount":
+        float | None} - amount is only included when every one of those past
+        occurrences charged the exact same amount too (a fixed subscription
+        or rent payment, not just a frequent but variable-cost merchant)."""
+        base = normalize_description(description)
+        if len(base) < 3:
+            return None
+
+        stmt = (
+            select(Transaction)
+            .options(joinedload(Transaction.category))
+            .where(Transaction.deleted_at.is_(None))
+        )
+        matches = [t for t in self.session.scalars(stmt) if normalize_description(t.description) == base]
+        if len(matches) < RECURRING_RULE_MIN_COUNT:
+            return None
+
+        categories = {t.category.name for t in matches}
+        if len(categories) != 1:
+            return None
+
+        amounts = {round(t.amount, 2) for t in matches}
+        return {"category": categories.pop(), "amount": amounts.pop() if len(amounts) == 1 else None}
 
     def find_duplicates(self, *, date: date_type, amount: float, transaction_type: str) -> list[Transaction]:
         """Same date + type + amount (to the paisa) as an existing active transaction -

@@ -138,11 +138,22 @@ def categorize(payload: CategorizeIn, session: Session = Depends(get_session)):
     if not description:
         return CategorizeOut(category="")
 
+    tx_repo = TransactionRepository(session)
+
     # A prior transaction with this exact description already tells us the
     # right category - more reliable than any model guess, and free.
-    existing = TransactionRepository(session).category_for_description(description)
+    existing = tx_repo.category_for_description(description)
     if existing:
         return CategorizeOut(category=existing)
+
+    # Same idea but for a RECURRING transaction re-entered with a fresh date
+    # each time ("Zomato (06/10/26)" vs "Zomato (07/11/26)") - the exact
+    # match above never fires for these since the strings differ, even
+    # though the pattern is obvious from history. Still free, still beats a
+    # model guess - tried before the LLM fallback below.
+    rule = tx_repo.suggest_from_rules(description)
+    if rule:
+        return CategorizeOut(category=rule["category"], amount=rule["amount"])
 
     categories = [c.name for c in CategoryRepository(session).list()]
     if not llm_router.available or not categories:

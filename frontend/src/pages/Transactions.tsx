@@ -42,6 +42,7 @@ interface NewRow {
   suggestion?: string;
   suggestionDurationSec?: number;
   categoryTouched?: boolean;
+  amountTouched?: boolean;
 }
 function emptyRow(): NewRow {
   return {
@@ -250,18 +251,24 @@ export function Transactions() {
       try {
         const rowDate = newRows.find((r) => r.id === rowId)?.date;
         const autocompleteStart = Date.now();
-        const [{ suggestion }, { category: suggestedCategory }] = await Promise.all([
+        const [{ suggestion }, { category: suggestedCategory, amount: suggestedAmount }] = await Promise.all([
           api.autocomplete(value, rowDate),
           api.categorize(value),
         ]);
         const suggestionDurationSec = (Date.now() - autocompleteStart) / 1000;
         if (suggestion) updateRow(rowId, { suggestion, suggestionDurationSec });
-        // Never override a category the user picked themselves.
-        setNewRows((rows) => rows.map((r) => (
-          r.id === rowId && !r.categoryTouched && !r.category && suggestedCategory
-            ? { ...r, category: suggestedCategory }
-            : r
-        )));
+        // Never override a category/amount the user already touched -
+        // suggestedAmount only ever comes from a recurring-transaction rule
+        // where every past occurrence charged the exact same amount (e.g.
+        // rent, a subscription), never from the LLM, so it's safe to
+        // prefill rather than just hint at.
+        setNewRows((rows) => rows.map((r) => {
+          if (r.id !== rowId) return r;
+          const next = { ...r };
+          if (!r.categoryTouched && !r.category && suggestedCategory) next.category = suggestedCategory;
+          if (!r.amountTouched && !r.amount && suggestedAmount != null) next.amount = String(suggestedAmount);
+          return next;
+        }));
       } catch {
         // Local AI features are optional - fail silently if unavailable.
       }
@@ -613,7 +620,7 @@ const saveView = useMutation({
                     </TableCell>
                     <TableCell>
                       <Input type="number" placeholder="Amount" step="0.01" value={row.amount}
-                        onChange={(e) => updateRow(row.id, { amount: e.target.value })} className="w-28" />
+                        onChange={(e) => updateRow(row.id, { amount: e.target.value, amountTouched: true })} className="w-28" />
                     </TableCell>
                     <TableCell>
                       <Select value={row.transaction_type} onValueChange={(v) => updateRow(row.id, { transaction_type: v })}>

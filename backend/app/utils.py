@@ -11,6 +11,25 @@ def utcnow() -> datetime:
 
 TXN_ID_RE = re.compile(r"^TXN-(\d{4})-(\d{6})$")
 
+# Strips a trailing date so "Zomato (06/10/26)" and "Zomato (07/11/26)" - the
+# same real-world merchant, re-entered or re-imported every month with a
+# fresh date baked into the text - normalize to the same base description
+# instead of comparing as two unrelated strings. Used by
+# TransactionRepository.suggest_from_rules() to recognize a recurring
+# transaction an EXACT description match (category_for_description) would
+# miss. The second alternative covers one odd but real "(DD/MMYY)" typo
+# pattern seen in actual imported data (a slash dropped before the year).
+_DATE_SUFFIX_RE = re.compile(
+    r"\s*[\(\[]?\s*\d{1,2}[/\-]\d{1,2}[/\-]\d{2,4}\s*[\)\]]?\s*$"
+    r"|\s*\(\d{2}/\d{2}\d{2}\)\s*$"
+)
+_WHITESPACE_RE = re.compile(r"\s+")
+
+
+def normalize_description(description: str) -> str:
+    base = _DATE_SUFFIX_RE.sub("", description).strip()
+    return _WHITESPACE_RE.sub(" ", base).lower()
+
 
 def content_hash(*, date: date_type, description: str, amount: float, transaction_type: str,
                   category_name: str, account_name: str, notes: Optional[str], deleted: bool = False) -> str:

@@ -96,6 +96,9 @@ class CategorizeIn(BaseModel):
 
 class CategorizeOut(BaseModel):
     category: str
+    # Only set when a recurring-transaction rule found a FIXED amount too
+    # (e.g. rent, a subscription) - see TransactionRepository.suggest_from_rules.
+    amount: Optional[float] = None
 
 
 class SuggestViewNameIn(BaseModel):

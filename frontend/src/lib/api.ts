@@ -150,7 +150,9 @@ export const api = {
   autocomplete: (text: string, date?: string) =>
     request<{ suggestion: string }>('/api/llm/autocomplete', { method: 'POST', body: JSON.stringify({ text, date }) }),
   categorize: (description: string) =>
-    request<{ category: string }>('/api/llm/categorize', { method: 'POST', body: JSON.stringify({ description }) }),
+    request<{ category: string; amount: number | null }>(
+      '/api/llm/categorize', { method: 'POST', body: JSON.stringify({ description }) },
+    ),
   suggestViewName: (filters: ViewFilters) =>
     request<{ name: string }>('/api/llm/suggest_view_name', {
       method: 'POST',
