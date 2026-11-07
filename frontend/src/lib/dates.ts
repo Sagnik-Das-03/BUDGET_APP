@@ -8,11 +8,33 @@ export function monthLabel(periodKey: string): string {
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 
-/** Inclusive [date_from, date_to] bounds for a "YYYY-MM" period key. */
+/** Inclusive [date_from, date_to] bounds for a "YYYY-MM" period key - clipped
+ * to today when periodKey is the CURRENT month, since no transaction dated
+ * after today could exist anyway (a real aggregate never changes from this -
+ * it's purely so callers can tell a still-in-progress month apart from a
+ * completed one, e.g. to avoid comparing a partial month against a full one
+ * and reporting a misleading swing - see Compare.tsx's monthToDatePeriod). */
 export function monthBounds(periodKey: string): { date_from: string; date_to: string } {
   const [year, month] = periodKey.split('-').map(Number);
   const from = new Date(Date.UTC(year, month - 1, 1));
   const to = new Date(Date.UTC(year, month, 0)); // day 0 of next month = last day of this month
+  const toIso = iso(to);
+  const todayIso = todayValue();
+  const clip = periodKey === thisMonthValue() && todayIso < toIso;
+  return { date_from: iso(from), date_to: clip ? todayIso : toIso };
+}
+
+/** Same [date_from, date_to] as monthBounds, but clipped to at most dayCount
+ * days into the month (clamped to the month's actual length) - lets a
+ * REFERENCE month be compared fairly against a still-in-progress one
+ * covering the same number of days, instead of a full month against a
+ * partial one (which makes the partial one look artificially lower on
+ * every metric - see Compare.tsx's "This month vs last month" preset). */
+export function monthToDateBounds(periodKey: string, dayCount: number): { date_from: string; date_to: string } {
+  const [year, month] = periodKey.split('-').map(Number);
+  const from = new Date(Date.UTC(year, month - 1, 1));
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const to = new Date(Date.UTC(year, month - 1, Math.min(dayCount, daysInMonth)));
   return { date_from: iso(from), date_to: iso(to) };
 }
 

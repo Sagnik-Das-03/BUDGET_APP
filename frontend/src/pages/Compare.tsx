@@ -5,7 +5,7 @@ import type { EChartsOption } from 'echarts';
 import { ArrowDown, ArrowUp, ArrowUpDown, TrendingDown, TrendingUp } from 'lucide-react';
 import { api } from '../lib/api';
 import { fmtMoney, fmtPct } from '../lib/format';
-import { shiftMonthValue, shiftWeekValue, thisMonthValue, thisWeekValue } from '../lib/dates';
+import { monthToDateBounds, shiftMonthValue, shiftWeekValue, thisMonthValue, thisWeekValue } from '../lib/dates';
 import { PeriodPicker, resolvePeriod, type PeriodValue } from '../components/PeriodPicker';
 import { CompareRecapCard } from '../components/CompareRecapCard';
 import { usePalette } from '../lib/usePalette';
@@ -58,12 +58,23 @@ function yearPeriod(year: string): PeriodValue {
   return { type: 'year', year, week: '', month: '', from: '', to: '' };
 }
 
+// When "this month" is still in progress, a REFERENCE month needs clipping
+// to the same day-of-month too - otherwise a full month looks artificially
+// bigger on every metric than a still-in-progress one, which has nothing to
+// do with an actual change (monthBounds() alone only clips the CURRENT
+// month, not a reference one - see lib/dates.ts's monthToDateBounds).
+function referenceMonthPeriod(targetMonth: string, todayDay: number): PeriodValue {
+  const bounds = monthToDateBounds(targetMonth, todayDay);
+  return { type: 'custom', from: bounds.date_from, to: bounds.date_to, month: '', week: '', year: '' };
+}
+
 export function Compare() {
   const thisMonth = thisMonthValue();
   const thisWeek = thisWeekValue();
   const thisYear = String(new Date().getFullYear());
+  const todayDay = new Date().getUTCDate();
   const [periodA, setPeriodA] = useState<PeriodValue>(monthPeriod(thisMonth));
-  const [periodB, setPeriodB] = useState<PeriodValue>(monthPeriod(shiftMonthValue(thisMonth, -1)));
+  const [periodB, setPeriodB] = useState<PeriodValue>(referenceMonthPeriod(shiftMonthValue(thisMonth, -1), todayDay));
   const [sortKey, setSortKey] = useState<SortKey>('delta');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const isDark = useIsDark();
@@ -200,10 +211,16 @@ export function Compare() {
         <Button variant="outline" size="sm" onClick={() => applyPreset(weekPeriod(thisWeek), weekPeriod(shiftWeekValue(thisWeek, -1)))}>
           This week vs last week
         </Button>
-        <Button variant="outline" size="sm" onClick={() => applyPreset(monthPeriod(thisMonth), monthPeriod(shiftMonthValue(thisMonth, -1)))}>
+        <Button
+          variant="outline" size="sm"
+          onClick={() => applyPreset(monthPeriod(thisMonth), referenceMonthPeriod(shiftMonthValue(thisMonth, -1), todayDay))}
+        >
           This month vs last month
         </Button>
-        <Button variant="outline" size="sm" onClick={() => applyPreset(monthPeriod(thisMonth), monthPeriod(shiftMonthValue(thisMonth, -12)))}>
+        <Button
+          variant="outline" size="sm"
+          onClick={() => applyPreset(monthPeriod(thisMonth), referenceMonthPeriod(shiftMonthValue(thisMonth, -12), todayDay))}
+        >
           This month vs same month last year
         </Button>
         <Button variant="outline" size="sm" onClick={() => applyPreset(yearPeriod(thisYear), yearPeriod(String(Number(thisYear) - 1)))}>
