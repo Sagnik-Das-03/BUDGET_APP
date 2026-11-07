@@ -68,14 +68,37 @@ echo.
 echo [5/6] Setting up backend virtual environment...
 cd backend
 
-if exist ".venv" (
+REM Checks for Scripts\activate.bat specifically, not just the bare .venv
+REM folder - a venv interrupted partway through creation (closed terminal,
+REM killed process, disk full) can leave a .venv directory that EXISTS but
+REM has no activate.bat/pip.exe/pyvenv.cfg inside, just whatever got copied
+REM before the interruption. The old bare "if exist .venv" check treated
+REM that as a normal "reuse it" case, so `call activate.bat` failed with a
+REM confusing "not recognized" error, silently fell through to whatever
+REM `python`/`pip` happened to be on PATH (the SYSTEM install, not this
+REM venv), and every install after that ran against the wrong Python
+REM entirely - the actual error (e.g. a dependency needing a newer Python
+REM than the system one) then looked unrelated to the real cause.
+if exist ".venv\Scripts\activate.bat" (
     echo Reusing existing virtual environment from a previous run...
 ) else (
+    if exist ".venv" (
+        echo Found an incomplete .venv from an interrupted previous run - removing it first...
+        rmdir /s /q ".venv"
+    )
     echo Creating virtual environment - Python 3.13...
     py -3.13 -m venv .venv
     if errorlevel 1 (
         echo.
         echo ERROR: Failed to create the virtual environment.
+        cd ..
+        pause
+        exit /b 1
+    )
+    if not exist ".venv\Scripts\activate.bat" (
+        echo.
+        echo ERROR: venv creation reported success but .venv\Scripts\activate.bat
+        echo is still missing - something is wrong with this Python 3.13 install.
         cd ..
         pause
         exit /b 1
