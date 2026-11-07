@@ -1,6 +1,9 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight, Lock, Pencil, Plus, Sparkles, Trash2, Unlock, X } from 'lucide-react';
+import {
+  ArrowDown, ArrowUp, ChevronDown, ChevronLeft, ChevronRight, Lock, Pencil, Plus, Sparkles,
+  Trash2, Unlock, X,
+} from 'lucide-react';
 import { api } from '../lib/api';
 import { fmtMoney, fmtMoneyExact } from '../lib/format';
 import { useLocalStorage } from '../lib/useLocalStorage';
@@ -14,6 +17,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { MultiSelectFilter } from '@/components/MultiSelectFilter';
 import { SaveViewPopover } from '@/components/SaveViewPopover';
@@ -118,6 +122,7 @@ export function Transactions() {
   const [newRows, setNewRows] = useState<NewRow[]>([emptyRow()]);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useLocalStorage('budget_tracker.transactionsPageSize', 50);
+  const [dateSortDir, setDateSortDir] = useLocalStorage<'asc' | 'desc'>('budget_tracker.transactionsDateSort', 'desc');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<EditDraft | null>(null);
   const [quickAddText, setQuickAddText] = useState('');
@@ -171,6 +176,7 @@ export function Transactions() {
     queryFn: () => api.recurringIncome(),
     enabled: !readOnly,
   });
+  const [recurringOpen, setRecurringOpen] = useLocalStorage('transactions.recurringIncomeOpen', true);
 
   const deleteTxn = useMutation({
     mutationFn: (id: string) => api.deleteTransaction(id),
@@ -233,9 +239,18 @@ export function Transactions() {
 
   const filteredTotals = useMemo(() => computeTotals(transactions.data ?? []), [transactions.data]);
 
-  const totalPages = Math.max(1, Math.ceil((transactions.data?.length ?? 0) / pageSize));
+  const sortedTransactions = useMemo(() => {
+    const rows = [...(transactions.data ?? [])];
+    rows.sort((a, b) => {
+      const cmp = a.date.localeCompare(b.date) || a.transaction_id.localeCompare(b.transaction_id);
+      return dateSortDir === 'asc' ? cmp : -cmp;
+    });
+    return rows;
+  }, [transactions.data, dateSortDir]);
+
+  const totalPages = Math.max(1, Math.ceil((sortedTransactions.length) / pageSize));
   const currentPage = Math.min(page, totalPages);
-  const pagedRows = (transactions.data ?? []).slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const pagedRows = sortedTransactions.slice((currentPage - 1) * pageSize, currentPage * pageSize);
   const allVisibleSelected = !!pagedRows.length && pagedRows.every((t) => selected.has(t.transaction_id));
 
   const validRows = newRows.filter((r) => r.description.trim() && r.category && parseFloat(r.amount) > 0);
@@ -451,23 +466,35 @@ const saveView = useMutation({
       </p>
 
       {!readOnly && !!recurringIncome.data?.length && (
-        <div className="mb-5 flex flex-col gap-2">
-          {recurringIncome.data.map((s) => (
-            <div
-              key={`${s.amount}-${s.description}`}
-              className="flex flex-wrap items-center gap-2.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3.5 py-2.5 text-sm text-emerald-900 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-200"
+        <Collapsible open={recurringOpen} onOpenChange={setRecurringOpen} className="mb-5">
+          <CollapsibleTrigger asChild>
+            <button
+              type="button"
+              className="flex w-full items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3.5 py-2.5 text-left text-sm text-emerald-900 hover:bg-emerald-100 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-200 dark:hover:bg-emerald-950/60"
             >
               <Sparkles className="size-4 shrink-0" />
-              <span>
-                Looks recurring: <strong>{fmtMoney(s.amount)}</strong> ({s.description}) — {s.occurrences} months
-                in a row, not recorded yet this month.
+              <span className="font-medium">
+                {recurringIncome.data.length} recurring income{recurringIncome.data.length > 1 ? 's' : ''} not recorded yet this month
               </span>
-              <Button size="sm" variant="outline" className="ml-auto" onClick={() => addRecurringIncomeRow(s)}>
-                Add it
-              </Button>
-            </div>
-          ))}
-        </div>
+              <ChevronDown className={`ml-auto size-4 shrink-0 transition-transform ${recurringOpen ? 'rotate-180' : ''}`} />
+            </button>
+          </CollapsibleTrigger>
+          <CollapsibleContent className="mt-2 flex flex-col gap-2">
+            {recurringIncome.data.map((s) => (
+              <div
+                key={`${s.amount}-${s.description}`}
+                className="flex flex-wrap items-center gap-2.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3.5 py-2.5 text-sm text-emerald-900 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-200"
+              >
+                <span>
+                  <strong>{fmtMoney(s.amount)}</strong> ({s.description}) — {s.occurrences} months in a row.
+                </span>
+                <Button size="sm" variant="outline" className="ml-auto" onClick={() => addRecurringIncomeRow(s)}>
+                  Add it
+                </Button>
+              </div>
+            ))}
+          </CollapsibleContent>
+        </Collapsible>
       )}
 
       {!readOnly && (
@@ -728,7 +755,16 @@ const saveView = useMutation({
                   />
                 </TableHead>
               )}
-              <TableHead className={readOnly ? 'pl-6' : undefined}>Date</TableHead><TableHead>Description</TableHead><TableHead>Category</TableHead>
+              <TableHead className={readOnly ? 'pl-6' : undefined}>
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1 hover:text-foreground"
+                  onClick={() => setDateSortDir(dateSortDir === 'asc' ? 'desc' : 'asc')}
+                >
+                  Date
+                  {dateSortDir === 'asc' ? <ArrowUp className="size-3" /> : <ArrowDown className="size-3" />}
+                </button>
+              </TableHead><TableHead>Description</TableHead><TableHead>Category</TableHead>
               <TableHead>Account</TableHead><TableHead>Type</TableHead>
               <TableHead className="text-right">Amount</TableHead>
               {!readOnly && <><TableHead>Sync</TableHead><TableHead></TableHead></>}
