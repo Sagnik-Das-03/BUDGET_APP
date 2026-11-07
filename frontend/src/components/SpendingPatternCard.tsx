@@ -66,8 +66,12 @@ export function SpendingPatternCard({ range, dateBounds, height = 180 }: Spendin
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-sm font-semibold">
-          <CalendarClock className="size-4 text-primary" /> Spending Pattern
+          <CalendarClock className="size-4 text-primary" /> Discretionary Spending Pattern
         </CardTitle>
+        <p className="text-xs text-muted-foreground">
+          Essential spending (rent, bills) excluded - it's usually paid on a fixed date regardless of habit, which
+          would bury the actual pattern here.
+        </p>
       </CardHeader>
       <CardContent className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div>

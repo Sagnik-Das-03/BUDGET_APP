@@ -446,16 +446,23 @@ _DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"
 
 def spending_pattern(session: Session, date_from: Optional[date_type] = None,
                       date_to: Optional[date_type] = None) -> dict:
-    """Where expense spending concentrates within a week (which day of the
-    week) and within a month (which third of it) - a purely descriptive
-    breakdown, no threshold or judgment involved. Can surface a 'weekend
-    spender' pattern or spending naturally front-loaded early in the month
-    (rent/bills on the 1st) that a category-only view wouldn't show."""
+    """Where DISCRETIONARY expense spending concentrates within a week (which
+    day of the week) and within a month (which third of it) - a purely
+    descriptive breakdown, no threshold beyond the essential/discretionary
+    split itself (Category.is_essential, same flag and same "real expense"
+    counts_as_expense gate as essential_vs_discretionary() above). Essential
+    spending (rent, utility bills) is excluded on purpose: it's usually paid
+    on a fixed date every month regardless of behavior, so including it would
+    just make "early in the month" win by default and bury the actual
+    behavioral pattern (a 'weekend spender' habit, say) this is meant to
+    surface in the first place."""
     by_dow = {name: 0.0 for name in _DAY_NAMES}
     by_third = {"1st (days 1-10)": 0.0, "2nd (days 11-20)": 0.0, "3rd (days 21+)": 0.0}
     total = 0.0
     for t in session.scalars(_base_query(date_from, date_to)):
         if t.transaction_type != TransactionType.expense:
+            continue
+        if not t.category.counts_as_expense or t.category.is_essential:
             continue
         total += t.amount
         by_dow[_DAY_NAMES[t.date.weekday()]] += t.amount
