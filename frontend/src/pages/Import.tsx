@@ -88,19 +88,19 @@ export function Import() {
     <>
       <h1 className="text-2xl font-bold tracking-tight">Import Transactions</h1>
       <p className="mb-5 mt-1 text-sm text-muted-foreground">
-        Upload a bank statement CSV. Nothing is saved until you review the preview below and confirm.
+        Upload a bank statement CSV or PDF. Nothing is saved until you review the preview below and confirm.
       </p>
 
       <Card className="mb-5">
         <CardHeader>
           <CardTitle className="text-sm font-semibold">1. Choose a file</CardTitle>
-          <CardDescription>Works with split Debit/Credit columns or a single signed Amount column - most Indian bank exports included.</CardDescription>
+          <CardDescription>CSV: works with split Debit/Credit columns or a single signed Amount column - most Indian bank exports included. PDF: Indian Bank account statements.</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-wrap items-center gap-3">
           <input
             ref={fileInputRef}
             type="file"
-            accept=".csv,text/csv"
+            accept=".csv,text/csv,.pdf,application/pdf"
             onChange={onFileChange}
             className="text-sm file:mr-3 file:rounded-md file:border file:border-input file:bg-transparent file:px-3 file:py-1.5 file:text-sm file:font-medium file:hover:bg-accent"
           />

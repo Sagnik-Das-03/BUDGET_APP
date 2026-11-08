@@ -10,6 +10,7 @@ typer==0.15.1
 python-dotenv==1.0.1
 openpyxl==3.1.5
 python-multipart==0.0.20
+pdfplumber==0.11.10
 pytest==8.3.4
 # Local AI features (app/llm/) - requires Python 3.10+ (this repo's venv uses
 # 3.13 per run.bat). Optional: the app degrades gracefully without it.

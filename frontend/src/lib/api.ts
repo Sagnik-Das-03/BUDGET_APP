@@ -256,7 +256,8 @@ export const api = {
   ): Promise<ImportPreviewResult> => {
     const formData = new FormData();
     formData.append('file', file);
-    const res = await fetch('/api/imports/csv/preview', { method: 'POST', body: formData });
+    const kind = file.name.toLowerCase().endsWith('.pdf') ? 'pdf' : 'csv';
+    const res = await fetch(`/api/imports/${kind}/preview`, { method: 'POST', body: formData });
     if (!res.ok) {
       const body = await res.text();
       let message = body;

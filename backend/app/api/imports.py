@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app._pydantic_compat import model_to_dict
 from app.db import get_session
 from app.imports.csv_parser import CsvParseError, ParseResult, parse_csv
+from app.imports.pdf_parser import PdfParseError, parse_pdf
 from app.llm.router import llm_router
 from app.models import TransactionSource, TransactionType
 from app.repositories.accounts import AccountRepository
@@ -151,6 +152,20 @@ def preview_csv(file: UploadFile = File(...), session: Session = Depends(get_ses
     try:
         result = parse_csv(content)
     except CsvParseError as exc:
+        raise HTTPException(400, str(exc))
+
+    return StreamingResponse(_stream_preview(result, session), media_type="application/x-ndjson")
+
+
+@router.post("/pdf/preview")
+def preview_pdf(file: UploadFile = File(...), session: Session = Depends(get_session)):
+    content = file.file.read()
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(400, "File too large (max 5 MB)")
+
+    try:
+        result = parse_pdf(content)
+    except PdfParseError as exc:
         raise HTTPException(400, str(exc))
 
     return StreamingResponse(_stream_preview(result, session), media_type="application/x-ndjson")
