@@ -418,11 +418,37 @@ def regenerate_viewer_manifest(sheets: GoogleSheetsService, manifest_spreadsheet
     for u in registry.list_users():
         if u["username"] == ADMIN_USERNAME:
             continue
-        spreadsheet_id = u.get("spreadsheet_id")
+        spreadsheet_id = u.get("spreadsheet_id") or _recover_spreadsheet_id_from_own_db(u)
         if not spreadsheet_id:
             continue
         grid.append([u["username"], spreadsheet_id, u.get("password_hash", "")])
     _rewrite_tab(sheets, manifest_spreadsheet_id, "Viewers", grid, header_rows0, [], [])
+
+
+def _recover_spreadsheet_id_from_own_db(user_entry: dict) -> Optional[str]:
+    """This denormalized copy (see UserRegistry.set_spreadsheet_id's
+    docstring) exists purely so regenerate_viewer_manifest doesn't have to
+    open every user's own database - but it CAN drift out of sync with the
+    real source of truth (that user's own app_settings row), silently
+    dropping them from the Viewers tab even though sync works fine for them
+    on desktop (a real incident, not hypothetical - this is what fixed
+    "Android only showing one viewer" once already). Falls back to reading
+    their own database directly, and heals the registry so this doesn't
+    have to run again for them."""
+    from app.db import session_for
+    from app.repositories.app_settings import SPREADSHEET_ID_KEY, AppSettingRepository
+
+    db_file = user_entry.get("db_file")
+    if not db_file:
+        return None
+    try:
+        with session_for(db_file) as session:
+            spreadsheet_id = AppSettingRepository(session).get(SPREADSHEET_ID_KEY)
+    except Exception:
+        return None
+    if spreadsheet_id:
+        registry.set_spreadsheet_id(user_entry["username"], spreadsheet_id)
+    return spreadsheet_id
 
 
 def regenerate_registry_backup(sheets: GoogleSheetsService, manifest_spreadsheet_id: str) -> None:
