@@ -94,7 +94,7 @@ export function Import() {
       <Card className="mb-5">
         <CardHeader>
           <CardTitle className="text-sm font-semibold">1. Choose a file</CardTitle>
-          <CardDescription>CSV: works with split Debit/Credit columns or a single signed Amount column - most Indian bank exports included. PDF: Indian Bank account statements.</CardDescription>
+          <CardDescription>CSV: works with split Debit/Credit columns or a single signed Amount column - most Indian bank exports included. PDF: Indian Bank and India Post account statements.</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-wrap items-center gap-3">
           <input

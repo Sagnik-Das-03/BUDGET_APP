@@ -10,6 +10,7 @@ from app._pydantic_compat import model_to_dict
 from app.db import get_session
 from app.imports.csv_parser import CsvParseError, ParseResult, parse_csv
 from app.imports.pdf_parser import PdfParseError, parse_pdf
+from app.imports.post_parser import PostParseError, parse_post_pdf
 from app.llm.router import llm_router
 from app.models import TransactionSource, TransactionType
 from app.repositories.accounts import AccountRepository
@@ -163,10 +164,17 @@ def preview_pdf(file: UploadFile = File(...), session: Session = Depends(get_ses
     if len(content) > MAX_UPLOAD_BYTES:
         raise HTTPException(400, "File too large (max 5 MB)")
 
+    # Each PDF parser is scoped to one bank's statement layout and raises
+    # when it can't find any dated transaction rows in what it extracted -
+    # tried in turn rather than sniffing the format up front, so adding a
+    # third bank later is just one more except clause, not a new detector.
     try:
         result = parse_pdf(content)
-    except PdfParseError as exc:
-        raise HTTPException(400, str(exc))
+    except PdfParseError:
+        try:
+            result = parse_post_pdf(content)
+        except PostParseError as exc:
+            raise HTTPException(400, str(exc))
 
     return StreamingResponse(_stream_preview(result, session), media_type="application/x-ndjson")
 
