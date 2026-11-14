@@ -53,7 +53,11 @@ export function App() {
         ) : (
           <TopRightDrawers />
         )}
-        <main className="min-w-0 flex-1 px-6 py-8">
+        {/* pt-16 (not py-8's 2rem) - the fixed top-right drawer bar above
+            sits at top-4 and is taller than that gap, so any page's own
+            top-right content (e.g. Transactions' "Edits locked" toggle)
+            would otherwise visually collide with it. */}
+        <main className="min-w-0 flex-1 px-6 pb-8 pt-16">
           <div className="mx-auto max-w-6xl">
             {readOnly ? (
               <Routes>
