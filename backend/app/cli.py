@@ -79,6 +79,13 @@ def dashboard_cmd(range: str = "this_month"):
 @app.command("sync-now")
 def sync_now():
     _bootstrap()
+    # run_once() reads the active user's spreadsheet id/credentials from the
+    # scheduler module's own cache, which only gets populated by starting the
+    # scheduler (app/main.py's startup) or reloading it explicitly - neither
+    # of which happens in a one-shot CLI invocation. Without this, run_once()
+    # always sees the cache's empty defaults and reports "not configured",
+    # even for a user who's fully set up and syncing fine through the app.
+    scheduler.reload_for_active_user()
     result = scheduler.run_once()
     typer.echo(result)
 
